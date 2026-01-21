@@ -20,3 +20,5 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Dev
+**/*/notes.md
