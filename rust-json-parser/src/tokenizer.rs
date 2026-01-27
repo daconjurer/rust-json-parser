@@ -1,3 +1,5 @@
+
+
 /*
  * Enum for Token kind. Valid variants:
  * LeftBrace, RightBrace, LeftBracket, RightBracket, Comma, Colon
@@ -17,10 +19,18 @@ pub enum Token {
     Null,
 }
 
-pub fn tokenize(_input: &str) -> Vec<Token> {
-    // Your code goes here
-    let v: Vec<Token> = Vec::new();
-    return v;
+pub fn tokenize(input: &str) -> Vec<Token> {
+    let mut tokens: Vec<Token> = Vec::new();
+
+    for c in input.chars() {
+        match c {
+            '{' => tokens.push(Token::LeftBrace),
+            '}' => tokens.push(Token::RightBrace),
+            _ => {},
+        }
+    }
+
+    return tokens;
 }
 
 #[cfg(test)]
@@ -29,7 +39,7 @@ mod tests {
 
     #[test]
     fn test_empty_braces() {
-        let tokens = tokenize("{}");
+        let tokens: Vec<Token> = tokenize("{}");
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], Token::LeftBrace);
         assert_eq!(tokens[1], Token::RightBrace);
