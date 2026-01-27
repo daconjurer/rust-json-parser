@@ -20,13 +20,33 @@ pub enum Token {
 pub fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut string_buffer: Vec<char> = Vec::new();
+    let mut number_buffer: Vec<char> = Vec::new();
     let mut processing_string: bool = false;
+    let mut last_was_numeric: bool = false;
 
     for c in input.chars() {
         match c {
-            _ if c.is_whitespace() => { /* skip whitespace */ }
             '{' => tokens.push(Token::LeftBrace),
             '}' => tokens.push(Token::RightBrace),
+            ':' => tokens.push(Token::Colon),
+            // Number processing
+            _ if c.is_numeric() => {
+                number_buffer.push(c);
+                last_was_numeric = true;
+                println!("Got numeric {}", c);
+            },
+            // Number, boolean and null processing
+            ',' => {
+                // finish processing number
+                if last_was_numeric {
+                    tokens.push(Token::Number(
+                        number_buffer.iter().collect::<String>()
+                        .parse::<f64>().unwrap())
+                    );
+                    last_was_numeric = false;
+                }
+                tokens.push(Token::Comma);
+            },
             // String processing
             '"' => {
                 processing_string = !processing_string;
@@ -34,13 +54,21 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 // finished consuming the string now
                 if !processing_string {
                     tokens.push(Token::String(string_buffer.iter().collect::<String>()));
+                    string_buffer = Vec::new();
                 }
             },
-            _ if c.is_alphabetic() & processing_string => {
+            _ if c.is_alphabetic() | c.is_whitespace() & processing_string => {
                 string_buffer.push(c);
-            }
+            },
             _ => {},
         }
+    }
+
+    if last_was_numeric {
+        tokens.push(Token::Number(
+            number_buffer.iter().collect::<String>()
+            .parse::<f64>().unwrap())
+        );
     }
 
     return tokens;
