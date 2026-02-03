@@ -5,25 +5,25 @@ use std::num::ParseFloatError;
 use std::str::Chars;
 
 #[derive(Debug)]
-pub enum TokenizeError {
+pub enum JsonError {
     InvalidSymbol(String),
     InvalidNumber(String),
 }
 
-impl fmt::Display for TokenizeError {
+impl fmt::Display for JsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TokenizeError::InvalidNumber(s) => write!(f, "Invalid number {}", s),
-            TokenizeError::InvalidSymbol(s) => write!(f, "Invalid symbol {}", s),
+            JsonError::InvalidNumber(s) => write!(f, "Invalid number {}", s),
+            JsonError::InvalidSymbol(s) => write!(f, "Invalid symbol {}", s),
         }
     }
 }
 
-impl Error for TokenizeError {}
+impl Error for JsonError {}
 
-impl From<std::num::ParseFloatError> for TokenizeError {
+impl From<std::num::ParseFloatError> for JsonError {
     fn from(_: std::num::ParseFloatError) -> Self {
-        TokenizeError::InvalidNumber("parse failed".to_string())
+        JsonError::InvalidNumber("parse failed".to_string())
     }
 }
 
@@ -46,7 +46,7 @@ pub enum Token {
     Null,
 }
 
-fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, TokenizeError> {
+fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
     while let Some(&c) = chars.peek() {
@@ -62,7 +62,7 @@ fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, TokenizeError> 
         "true" => Ok(Token::Boolean(true)),
         "false" => Ok(Token::Boolean(false)),
         "null" => Ok(Token::Null),
-        _ => Err(TokenizeError::InvalidSymbol(consumed_keyword)),
+        _ => Err(JsonError::InvalidSymbol(consumed_keyword)),
     }
 }
 
@@ -94,7 +94,7 @@ fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, ParseFloatError> {
     number_as_string.parse::<f64>()
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
+pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut chars = input.chars().peekable();
 
