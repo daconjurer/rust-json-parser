@@ -1,46 +1,6 @@
-use std::error::Error;
-use std::fmt;
+use crate::error::JsonError;
 use std::iter::Peekable;
 use std::str::Chars;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum JsonError {
-    UnexpectedToken {
-        expected: String,
-        found: String,
-        position: usize,
-    },
-}
-
-impl fmt::Display for JsonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JsonError::UnexpectedToken {
-                expected,
-                found,
-                position,
-            } => {
-                write!(
-                    f,
-                    "Unexpected token at position {}: expected {}, found {}",
-                    position, expected, found,
-                )
-            }
-        }
-    }
-}
-
-impl Error for JsonError {}
-
-impl From<std::num::ParseFloatError> for JsonError {
-    fn from(_: std::num::ParseFloatError) -> Self {
-        JsonError::UnexpectedToken {
-            expected: "number".to_string(),
-            found: "NaN".to_string(), // TODO
-            position: 0, // TODO
-        }
-    }
-}
 
 /*
  * Enum for Token kind. Valid variants:
