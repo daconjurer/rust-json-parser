@@ -1,20 +1,31 @@
 use std::error::Error;
 use std::fmt;
 use std::iter::Peekable;
-use std::num::ParseFloatError;
 use std::str::Chars;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JsonError {
-    InvalidSymbol(String),
-    InvalidNumber(String),
+    UnexpectedToken {
+        expected: String,
+        found: String,
+        position: usize,
+    },
 }
 
 impl fmt::Display for JsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JsonError::InvalidNumber(s) => write!(f, "Invalid number {}", s),
-            JsonError::InvalidSymbol(s) => write!(f, "Invalid symbol {}", s),
+            JsonError::UnexpectedToken {
+                expected,
+                found,
+                position,
+            } => {
+                write!(
+                    f,
+                    "Unexpected token at position {}: expected {}, found {}",
+                    position, expected, found,
+                )
+            }
         }
     }
 }
@@ -23,7 +34,11 @@ impl Error for JsonError {}
 
 impl From<std::num::ParseFloatError> for JsonError {
     fn from(_: std::num::ParseFloatError) -> Self {
-        JsonError::InvalidNumber("parse failed".to_string())
+        JsonError::UnexpectedToken {
+            expected: "number".to_string(),
+            found: "NaN".to_string(), // TODO
+            position: 0, // TODO
+        }
     }
 }
 
@@ -62,7 +77,11 @@ fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, JsonError> {
         "true" => Ok(Token::Boolean(true)),
         "false" => Ok(Token::Boolean(false)),
         "null" => Ok(Token::Null),
-        _ => Err(JsonError::InvalidSymbol(consumed_keyword)),
+        _ => Err(JsonError::UnexpectedToken {
+            expected: "true, false or null".to_string(),
+            found: consumed_keyword,
+            position: 0, // TODO
+        }),
     }
 }
 
@@ -80,7 +99,7 @@ fn consume_string(chars: &mut Peekable<Chars>) -> String {
     buffer.iter().collect::<String>()
 }
 
-fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, ParseFloatError> {
+fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
     while let Some(&c) = chars.peek() {
@@ -91,7 +110,8 @@ fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, ParseFloatError> {
         chars.next();
     }
     let number_as_string = buffer.iter().collect::<String>();
-    number_as_string.parse::<f64>()
+    let number = number_as_string.parse::<f64>()?;
+    Ok(number)
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
