@@ -85,7 +85,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
                 let consumed_string = consume_string(&mut chars);
                 tokens.push(Token::String(consumed_string));
             }
-            '0'..='9' => {
+            '0'..='9' | '-' => {
                 let n = consume_number(&mut chars)?;
                 tokens.push(Token::Number(n));
             }
@@ -121,6 +121,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::JsonError;
+
+    // Result type alias for cleaner test signatures
+    type Result<T> = std::result::Result<T, JsonError>;
 
     #[test]
     fn test_empty_braces() {
@@ -190,5 +194,72 @@ mod tests {
         assert!(tokens.contains(&Token::String("active".to_string())));
         assert!(tokens.contains(&Token::Boolean(true)));
         assert_eq!(tokens[8], Token::RightBrace);
+    }
+
+    /*
+     * Error handling tests
+     */
+
+    // String boundary tests - verify inner vs outer quote handling
+    #[test]
+    fn test_empty_string() -> Result<()> {
+        // Outer boundary: adjacent quotes with no inner content
+        let tokens = tokenize(r#""""#)?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_containing_json_special_chars() -> Result<()> {
+        // Inner handling: JSON delimiters inside strings don't break tokenization
+        let tokens = tokenize(r#""{key: value}""#)?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("{key: value}".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_with_keyword_like_content() -> Result<()> {
+        // Inner handling: "true", "false", "null" inside strings stay as string content
+        let tokens = tokenize(r#""not true or false""#)?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("not true or false".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_with_number_like_content() -> Result<()> {
+        // Inner handling: numeric content inside strings doesn't become Number tokens
+        let tokens = tokenize(r#""phone: 555-1234""#)?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("phone: 555-1234".to_string()));
+        Ok(())
+    }
+
+    // Number parsing tests
+    #[test]
+    fn test_negative_number() -> Result<()> {
+        let tokens = tokenize("-42")?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::Number(-42.0));
+        Ok(())
+    }
+
+    #[test]
+    fn test_decimal_number() -> Result<()> {
+        let tokens = tokenize("0.5")?;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::Number(0.5));
+        Ok(())
+    }
+
+    #[test]
+    fn test_leading_decimal_not_a_number() -> Result<()> {
+        // .5 is invalid JSON - numbers must have leading digit (0.5 is valid)
+        let tokens = tokenize(".5")?;
+        // Should NOT be interpreted as 0.5
+        assert!(!tokens.contains(&Token::Number(0.5)));
+        Ok(())
     }
 }
