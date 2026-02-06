@@ -85,29 +85,29 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // #[test]
-    // fn test_parse_with_whitespace() {
-    //     let result = parse_json("  42  ").unwrap();
-    //     assert_eq!(result, JsonValue::Number(42.0));
+    #[test]
+    fn test_parse_with_whitespace() {
+        let result = parse_json("  42  ").unwrap();
+        assert_eq!(result, JsonValue::Number(42.0));
 
-    //     let result = parse_json("\n\ttrue\n").unwrap();
-    //     assert_eq!(result, JsonValue::Boolean(true));
-    // }
+        let result = parse_json("\n\ttrue\n").unwrap();
+        assert_eq!(result, JsonValue::Boolean(true));
+    }
 
-    // #[test]
-    // fn test_result_pattern_matching() {
-    //     let result = parse_json("42");
+    #[test]
+    fn test_result_pattern_matching() {
+        let result = parse_json("42");
 
-    //     match result {
-    //         Ok(JsonValue::Number(n)) => assert_eq!(n, 42.0),
-    //         _ => panic!("Expected successful number parse"),
-    //     }
+        match result {
+            Ok(JsonValue::Number(n)) => assert_eq!(n, 42.0),
+            _ => panic!("Expected successful number parse"),
+        }
 
-    //     let result = parse_json("@invalid@");
+        let result = parse_json("@invalid@");
 
-    //     match result {
-    //         Err(JsonError::UnexpectedToken { .. }) => {}, // Expected
-    //         _ => panic!("Expected UnexpectedToken error"),
-    //     }
-    // }
+        match result {
+            Err(JsonError::UnexpectedToken { .. }) => {} // Expected
+            _ => panic!("Expected UnexpectedToken error"),
+        }
+    }
 }

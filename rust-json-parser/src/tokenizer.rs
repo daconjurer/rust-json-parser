@@ -25,7 +25,7 @@ fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
     while let Some(&c) = chars.peek() {
-        if c == ',' || c == ' ' || c == '}' {
+        if c == ',' || c == ' ' || c == '}' || c == '\n' || c == '\t' {
             break;
         }
         buffer.push(c);
@@ -63,7 +63,7 @@ fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
     while let Some(&c) = chars.peek() {
-        if c == ',' {
+        if c == ',' || c == ' ' {
             break;
         }
         buffer.push(c);
