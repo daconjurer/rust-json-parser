@@ -1,6 +1,12 @@
 use std::error::Error;
 use std::fmt;
 
+/*
+ * Enum for JsonError kind. Valid variants:
+ * UnexpectedToken: represents TODO
+ * UnexpectedEndOfInput: represents TODO
+ * InvalidNumber: represents TODO
+ */
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonError {
     UnexpectedToken {

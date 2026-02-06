@@ -115,7 +115,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
         }
     }
 
-    return Ok(tokens);
+    Ok(tokens)
 }
 
 #[cfg(test)]
