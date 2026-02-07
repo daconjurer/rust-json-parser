@@ -21,6 +21,14 @@ pub enum Token {
     Null,
 }
 
+fn unexpected_token_error<T>(found: String, position: usize) -> Result<T, JsonError> {
+    Err(JsonError::UnexpectedToken {
+        expected: "valid JSON token".to_string(),
+        found,
+        position,
+    })
+}
+
 fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
@@ -37,11 +45,13 @@ fn consume_keyword(chars: &mut Peekable<Chars>) -> Result<Token, JsonError> {
         "true" => Ok(Token::Boolean(true)),
         "false" => Ok(Token::Boolean(false)),
         "null" => Ok(Token::Null),
-        _ => Err(JsonError::UnexpectedToken {
-            expected: "true, false or null".to_string(),
-            found: consumed_keyword,
-            position: 0, // TODO
-        }),
+        _ => {
+            let found = match consumed_keyword.chars().next() {
+                Some(first) => first.to_string(),
+                None => "unknown".to_string(),
+            };
+            unexpected_token_error(found, 0)
+        }
     }
 }
 
@@ -101,15 +111,19 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
                 chars.next();
                 tokens.push(Token::Comma);
             }
-            _ if c.is_alphabetic() => {
-                let keyword_token = consume_keyword(&mut chars)?;
-                tokens.push(keyword_token);
-            }
             ':' => {
                 chars.next();
                 tokens.push(Token::Colon);
             }
+            _ if c.is_alphabetic() => {
+                let keyword_token = consume_keyword(&mut chars)?;
+                tokens.push(keyword_token);
+            }
             _ => {
+                // TODO: Narrow me
+                if c.is_ascii_punctuation() {
+                    return unexpected_token_error(c.to_string(), 0);
+                }
                 chars.next();
             } // TODO: raise error
         }
@@ -255,11 +269,10 @@ mod tests {
     }
 
     #[test]
-    fn test_leading_decimal_not_a_number() -> Result<()> {
+    fn test_leading_decimal_not_a_number() {
         // .5 is invalid JSON - numbers must have leading digit (0.5 is valid)
-        let tokens = tokenize(".5")?;
+        let result = tokenize(".5");
         // Should NOT be interpreted as 0.5
-        assert!(!tokens.contains(&Token::Number(0.5)));
-        Ok(())
+        assert!(matches!(result, Err(JsonError::UnexpectedToken { .. })));
     }
 }
