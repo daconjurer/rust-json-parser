@@ -2,10 +2,11 @@ use std::error::Error;
 use std::fmt;
 
 /*
- * Enum for JsonError kind. Valid variants:
- * UnexpectedToken: represents TODO
- * UnexpectedEndOfInput: represents TODO
- * InvalidNumber: represents TODO
+ * Enum for JsonError kind, for unsuccessful JSON processing.
+ * Valid variants:
+ * UnexpectedToken
+ * UnexpectedEndOfInput
+ * InvalidNumber
  */
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonError {
@@ -57,16 +58,6 @@ impl fmt::Display for JsonError {
 }
 
 impl Error for JsonError {}
-
-impl From<std::num::ParseFloatError> for JsonError {
-    fn from(_: std::num::ParseFloatError) -> Self {
-        JsonError::UnexpectedToken {
-            expected: "number".to_string(),
-            found: "NaN".to_string(), // TODO
-            position: 0,              // TODO
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

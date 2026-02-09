@@ -73,14 +73,19 @@ fn consume_number(chars: &mut Peekable<Chars>) -> Result<f64, JsonError> {
     let mut buffer: Vec<char> = Vec::new();
 
     while let Some(&c) = chars.peek() {
-        if c == ',' || c == ' ' {
+        if !(c.is_numeric() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') {
             break;
         }
         buffer.push(c);
         chars.next();
     }
     let number_as_string = buffer.iter().collect::<String>();
-    let number = number_as_string.parse::<f64>()?;
+    let number = number_as_string
+        .parse::<f64>()
+        .map_err(|_| JsonError::InvalidNumber {
+            value: number_as_string.clone(),
+            position: 0,
+        })?;
     Ok(number)
 }
 
@@ -90,6 +95,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
 
     while let Some(&c) = chars.peek() {
         match c {
+            ' ' | '\n' | '\t' | '\r' => {
+                chars.next(); // explicitly skip whitespace
+            }
             '"' => {
                 chars.next(); // consume opening quote
                 let consumed_string = consume_string(&mut chars);
@@ -120,12 +128,11 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, JsonError> {
                 tokens.push(keyword_token);
             }
             _ => {
-                // TODO: Narrow me
                 if c.is_ascii_punctuation() {
                     return unexpected_token_error(c.to_string(), 0);
                 }
                 chars.next();
-            } // TODO: raise error
+            }
         }
     }
 
