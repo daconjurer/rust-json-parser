@@ -180,6 +180,115 @@ impl Tokenizer {
     pub fn current(&self) -> usize {
         self.current
     }
+
+    fn consume_number(&mut self) -> Result<f64, JsonError> {
+        let mut buffer: Vec<char> = Vec::new();
+
+        while let Some(c) = self.peek() {
+            if !(c.is_numeric() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') {
+                break;
+            }
+            buffer.push(c);
+            self.advance();
+        }
+        let number_as_string = buffer.iter().collect::<String>();
+        let number = number_as_string
+            .parse::<f64>()
+            .map_err(|_| JsonError::InvalidNumber {
+                value: number_as_string.clone(),
+                position: 0,
+            })?;
+        Ok(number)
+    }
+
+    fn consume_string(&mut self) -> String {
+        let mut buffer: Vec<char> = Vec::new();
+
+        while let Some(c) = self.peek() {
+            if c == '"' {
+                self.advance(); // consume closing quote
+                break;
+            }
+            buffer.push(c);
+            self.advance();
+        }
+        buffer.iter().collect::<String>()
+    }
+
+    fn consume_keyword(&mut self) -> Result<Token, JsonError> {
+        let mut buffer: Vec<char> = Vec::new();
+
+        while let Some(c) = self.peek() {
+            if c == ',' || c == ' ' || c == '}' || c == '\n' || c == '\t' {
+                break;
+            }
+            buffer.push(c);
+            self.advance();
+        }
+        let consumed_keyword = buffer.iter().collect::<String>();
+
+        match consumed_keyword.as_str() {
+            "true" => Ok(Token::Boolean(true)),
+            "false" => Ok(Token::Boolean(false)),
+            "null" => Ok(Token::Null),
+            _ => {
+                let found = match consumed_keyword.chars().next() {
+                    Some(first) => first.to_string(),
+                    None => "unknown".to_string(),
+                };
+                unexpected_token_error(found, 0)
+            }
+        }
+    }
+
+    pub fn tokenize(&mut self) -> Result<Vec<Token>, JsonError> {
+        let mut tokens: Vec<Token> = Vec::new();
+
+        while let Some(c) = self.peek() {
+            match c {
+                ' ' | '\n' | '\t' | '\r' => {
+                    self.advance(); // explicitly skip whitespace
+                }
+                '"' => {
+                    self.advance(); // consume opening quote
+                    let consumed_string = self.consume_string();
+                    tokens.push(Token::String(consumed_string));
+                }
+                '0'..='9' | '-' => {
+                    let n = self.consume_number()?;
+                    tokens.push(Token::Number(n));
+                }
+                '{' => {
+                    self.advance();
+                    tokens.push(Token::LeftBrace);
+                }
+                '}' => {
+                    self.advance();
+                    tokens.push(Token::RightBrace);
+                }
+                ',' => {
+                    self.advance();
+                    tokens.push(Token::Comma);
+                }
+                ':' => {
+                    self.advance();
+                    tokens.push(Token::Colon);
+                }
+                _ if c.is_alphabetic() => {
+                    let keyword_token = self.consume_keyword()?;
+                    tokens.push(keyword_token);
+                }
+                _ => {
+                    if c.is_ascii_punctuation() {
+                        return unexpected_token_error(c.to_string(), 0);
+                    }
+                    self.advance();
+                }
+            }
+        }
+
+        Ok(tokens)
+    }
 }
 
 // #[cfg(test)]
@@ -340,6 +449,19 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenizer_multiple_tokens() {
+        // Tests that a single tokenize() call handles multiple tokens
+        // Note: Unlike Python iterators, calling tokenize() again on the same
+        // instance would return empty - the input has been consumed.
+        // Create a new Tokenizer instance if you need to parse new input.
+        let mut tokenizer = Tokenizer::new("123 456");
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2);
+    }
+
+    // === Tokenizer interfaces ===
+
+    #[test]
     fn test_peek() {
         let tokenizer = Tokenizer::new(r#""hello""#);
         assert_eq!(tokenizer.peek(), Some('"'));
@@ -364,53 +486,42 @@ mod tests {
         assert!(tokenizer.is_at_end());
     }
 
-    // #[test]
-    // fn test_tokenizer_multiple_tokens() {
-    //     // Tests that a single tokenize() call handles multiple tokens
-    //     // Note: Unlike Python iterators, calling tokenize() again on the same
-    //     // instance would return empty - the input has been consumed.
-    //     // Create a new Tokenizer instance if you need to parse new input.
-    //     let mut tokenizer = Tokenizer::new("123 456");
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens.len(), 2);
-    // }
+    // === Basic Token Tests (from Week 1 - ensure they still pass) ===
 
-    // // === Basic Token Tests (from Week 1 - ensure they still pass) ===
+    #[test]
+    fn test_tokenize_number() {
+        let mut tokenizer = Tokenizer::new("42");
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::Number(42.0)]);
+    }
 
-    // #[test]
-    // fn test_tokenize_number() {
-    //     let mut tokenizer = Tokenizer::new("42");
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::Number(42.0)]);
-    // }
+    #[test]
+    fn test_tokenize_negative_number() {
+        let mut tokenizer = Tokenizer::new("-3.14");
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::Number(-3.14)]);
+    }
 
-    // #[test]
-    // fn test_tokenize_negative_number() {
-    //     let mut tokenizer = Tokenizer::new("-3.14");
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::Number(-3.14)]);
-    // }
+    #[test]
+    fn test_tokenize_literals() {
+        let mut t1 = Tokenizer::new("true");
+        assert_eq!(t1.tokenize().unwrap(), vec![Token::Boolean(true)]);
 
-    // #[test]
-    // fn test_tokenize_literals() {
-    //     let mut t1 = Tokenizer::new("true");
-    //     assert_eq!(t1.tokenize().unwrap(), vec![Token::Boolean(true)]);
+        let mut t2 = Tokenizer::new("false");
+        assert_eq!(t2.tokenize().unwrap(), vec![Token::Boolean(false)]);
 
-    //     let mut t2 = Tokenizer::new("false");
-    //     assert_eq!(t2.tokenize().unwrap(), vec![Token::Boolean(false)]);
+        let mut t3 = Tokenizer::new("null");
+        assert_eq!(t3.tokenize().unwrap(), vec![Token::Null]);
+    }
 
-    //     let mut t3 = Tokenizer::new("null");
-    //     assert_eq!(t3.tokenize().unwrap(), vec![Token::Null]);
-    // }
+    #[test]
+    fn test_tokenize_simple_string() {
+        let mut tokenizer = Tokenizer::new(r#""hello""#);
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::String("hello".to_string())]);
+    }
 
-    // #[test]
-    // fn test_tokenize_simple_string() {
-    //     let mut tokenizer = Tokenizer::new(r#""hello""#);
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::String("hello".to_string())]);
-    // }
-
-    // // === Escape Sequence Tests ===
+    // === Escape Sequence Tests ===
 
     // #[test]
     // fn test_escape_newline() {
@@ -468,7 +579,7 @@ mod tests {
     //     assert_eq!(tokens, vec![Token::String("a\nb\tc\"".to_string())]);
     // }
 
-    // // === Unicode Escape Tests ===
+    // === Unicode Escape Tests ===
 
     // #[test]
     // fn test_unicode_escape_basic() {
@@ -502,7 +613,7 @@ mod tests {
     //     assert_eq!(tokens, vec![Token::String("J".to_string())]);
     // }
 
-    // // === Error Tests ===
+    // === Error Tests ===
 
     // #[test]
     // fn test_invalid_escape_sequence() {
