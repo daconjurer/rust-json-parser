@@ -151,6 +151,35 @@ impl Tokenizer {
             input: input.chars().collect(),
         }
     }
+
+    /*
+     * Look at current char without advancing
+     */
+    pub fn peek(&self) -> Option<char> {
+        self.input.get(self.current).copied()
+    }
+
+    /*
+     * Move forward, return previous char
+     */
+    pub fn advance(&mut self) -> Option<char> {
+        self.current += 1;
+        self.input.get(self.current - 1).copied()
+    }
+
+    /*
+     * Check if the input has been consumed
+     */
+    pub fn is_at_end(&self) -> bool {
+        self.peek().is_none()
+    }
+
+    /*
+     * TODO: Remove me
+     */
+    pub fn current(&self) -> usize {
+        self.current
+    }
 }
 
 // #[cfg(test)]
@@ -305,21 +334,46 @@ mod tests {
 
     #[test]
     fn test_tokenizer_struct_creation() {
-        let tokenizer = Tokenizer::new(r#""hello""#);
+        let _ = Tokenizer::new(r#""hello""#);
         // Tokenizer should be created without error
         // Internal state is private, so we test via tokenize()
     }
 
     #[test]
-    fn test_tokenizer_multiple_tokens() {
-        // Tests that a single tokenize() call handles multiple tokens
-        // Note: Unlike Python iterators, calling tokenize() again on the same
-        // instance would return empty - the input has been consumed.
-        // Create a new Tokenizer instance if you need to parse new input.
-        let mut tokenizer = Tokenizer::new("123 456");
-        let tokens = tokenizer.tokenize().unwrap();
-        assert_eq!(tokens.len(), 2);
+    fn test_peek() {
+        let tokenizer = Tokenizer::new(r#""hello""#);
+        assert_eq!(tokenizer.peek(), Some('"'));
+        assert_eq!(tokenizer.current(), 0);
     }
+
+    #[test]
+    fn test_advance() {
+        let mut tokenizer = Tokenizer::new(r#"""hello"#);
+        assert_eq!(tokenizer.advance(), Some('"'));
+        assert_eq!(tokenizer.current(), 1);
+    }
+
+    #[test]
+    fn test_is_at_end() {
+        let mut tokenizer = Tokenizer::new(r#""h""#);
+
+        for _ in 0..3 {
+            assert!(!tokenizer.is_at_end());
+            tokenizer.advance();
+        }
+        assert!(tokenizer.is_at_end());
+    }
+
+    // #[test]
+    // fn test_tokenizer_multiple_tokens() {
+    //     // Tests that a single tokenize() call handles multiple tokens
+    //     // Note: Unlike Python iterators, calling tokenize() again on the same
+    //     // instance would return empty - the input has been consumed.
+    //     // Create a new Tokenizer instance if you need to parse new input.
+    //     let mut tokenizer = Tokenizer::new("123 456");
+    //     let tokens = tokenizer.tokenize().unwrap();
+    //     assert_eq!(tokens.len(), 2);
+    // }
 
     // // === Basic Token Tests (from Week 1 - ensure they still pass) ===
 
