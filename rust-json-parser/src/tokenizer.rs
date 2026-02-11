@@ -41,6 +41,13 @@ fn resolve_escape_sequence(char: &char) -> Option<char> {
     }
 }
 
+fn parse_unicode_hex(s: &str) -> Option<char> {
+    if s.len() != 4 {
+        return None;
+    }
+    u32::from_str_radix(s, 16).ok().and_then(char::from_u32)
+}
+
 pub struct Tokenizer {
     input: Vec<char>,
     current: usize,
@@ -72,7 +79,7 @@ impl Tokenizer {
     /*
      * Check if the input has been consumed
      */
-    fn is_at_end(&self) -> bool {
+    fn _is_at_end(&self) -> bool {
         self.peek().is_none()
     }
 
@@ -103,7 +110,7 @@ impl Tokenizer {
             match c {
                 '"' => {
                     self.advance(); // consume closing quote
-                    break;
+                    return Ok(buffer.iter().collect());
                 }
                 '\\' => {
                     self.advance(); // consume escape character
@@ -112,13 +119,33 @@ impl Tokenizer {
                             expected: "Special meaning char for escape sequence".to_string(),
                             position: self.current,
                         })?;
-                    let escape_sequence = resolve_escape_sequence(&special_meaning).ok_or(
-                        JsonError::InvalidEscape {
-                            char: special_meaning,
+                    // Process unicode chars
+                    if special_meaning == 'u' {
+                        let mut unicode_buffer: Vec<char> = Vec::new();
+                        for _ in 0..4 {
+                            let uni_char = self.advance().ok_or(JsonError::InvalidUnicode {
+                                sequence: "Unicode sequence".to_string(),
+                                position: self.current,
+                            })?;
+                            unicode_buffer.push(uni_char);
+                        }
+                        let unicode_sequence = parse_unicode_hex(
+                            &unicode_buffer.iter().collect::<String>(),
+                        )
+                        .ok_or(JsonError::InvalidUnicode {
+                            sequence: "Unicode sequence".to_string(),
                             position: self.current,
-                        },
-                    )?;
-                    buffer.push(escape_sequence);
+                        })?;
+                        buffer.push(unicode_sequence);
+                    } else {
+                        let escape_sequence = resolve_escape_sequence(&special_meaning).ok_or(
+                            JsonError::InvalidEscape {
+                                char: special_meaning,
+                                position: self.current,
+                            },
+                        )?;
+                        buffer.push(escape_sequence);
+                    }
                 }
                 _ => {
                     buffer.push(c);
@@ -126,7 +153,11 @@ impl Tokenizer {
                 }
             }
         }
-        Ok(buffer.iter().collect::<String>())
+        // Unterminated string
+        Err(JsonError::UnexpectedEndOfInput {
+            expected: "Closing quote".to_string(),
+            position: self.current,
+        })
     }
 
     fn consume_keyword(&mut self) -> Result<Token, JsonError> {
@@ -205,153 +236,10 @@ impl Tokenizer {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::error::JsonError;
-
-//     // Result type alias for cleaner test signatures
-//     type Result<T> = std::result::Result<T, JsonError>;
-
-//     #[test]
-//     fn test_empty_braces() {
-//         let tokens = tokenize("{}").expect("Tokenize should process empty brackets");
-//         assert_eq!(tokens.len(), 2);
-//         assert_eq!(tokens[0], Token::LeftBrace);
-//         assert_eq!(tokens[1], Token::RightBrace);
-//     }
-
-//     #[test]
-//     fn test_simple_string() {
-//         let tokens =
-//             tokenize(r#""hello""#).expect("Tokenize should process simple raw string literals");
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("hello".to_string()));
-//     }
-
-//     #[test]
-//     fn test_number() {
-//         let tokens = tokenize("42").expect("Tokenize should process simple number");
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::Number(42.0));
-//     }
-
-//     #[test]
-//     fn test_tokenize_string() {
-//         let tokens =
-//             tokenize(r#""hello world""#).expect("Tokenize should process strings with spaces");
-
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("hello world".to_string()));
-//     }
-
-//     #[test]
-//     fn test_boolean_and_null() {
-//         let tokens: Vec<Token> = tokenize("true false null")
-//             .expect("Tokenize should process keywords (null, false, true)");
-//         assert_eq!(tokens.len(), 3);
-//         assert_eq!(tokens[0], Token::Boolean(true));
-//         assert_eq!(tokens[1], Token::Boolean(false));
-//         assert_eq!(tokens[2], Token::Null);
-//     }
-
-//     #[test]
-//     fn test_simple_object() {
-//         let tokens: Vec<Token> =
-//             tokenize(r#"{"name": "Alice"}"#).expect("Tokenize should process simple object");
-//         assert_eq!(tokens.len(), 5);
-//         assert_eq!(tokens[0], Token::LeftBrace);
-//         assert_eq!(tokens[1], Token::String("name".to_string()));
-//         assert_eq!(tokens[2], Token::Colon);
-//         assert_eq!(tokens[3], Token::String("Alice".to_string()));
-//         assert_eq!(tokens[4], Token::RightBrace);
-//     }
-
-//     #[test]
-//     fn test_multiple_values() {
-//         let tokens = tokenize(r#"{"age": 30, "active": true}"#)
-//             .expect("Tokenize should process object with multiple values");
-
-//         assert_eq!(tokens.len(), 9);
-//         // Verify we have the right tokens
-//         assert_eq!(tokens[0], Token::LeftBrace);
-//         assert!(tokens.contains(&Token::String("age".to_string())));
-//         assert!(tokens.contains(&Token::Number(30.0)));
-//         assert!(tokens.contains(&Token::Comma));
-//         assert!(tokens.contains(&Token::String("active".to_string())));
-//         assert!(tokens.contains(&Token::Boolean(true)));
-//         assert_eq!(tokens[8], Token::RightBrace);
-//     }
-
-//     /*
-//      * Error handling tests
-//      */
-//     // String boundary tests - verify inner vs outer quote handling
-//     #[test]
-//     fn test_empty_string() -> Result<()> {
-//         // Outer boundary: adjacent quotes with no inner content
-//         let tokens = tokenize(r#""""#)?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("".to_string()));
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_string_containing_json_special_chars() -> Result<()> {
-//         // Inner handling: JSON delimiters inside strings don't break tokenization
-//         let tokens = tokenize(r#""{key: value}""#)?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("{key: value}".to_string()));
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_string_with_keyword_like_content() -> Result<()> {
-//         // Inner handling: "true", "false", "null" inside strings stay as string content
-//         let tokens = tokenize(r#""not true or false""#)?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("not true or false".to_string()));
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_string_with_number_like_content() -> Result<()> {
-//         // Inner handling: numeric content inside strings doesn't become Number tokens
-//         let tokens = tokenize(r#""phone: 555-1234""#)?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::String("phone: 555-1234".to_string()));
-//         Ok(())
-//     }
-
-//     // Number parsing tests
-//     #[test]
-//     fn test_negative_number() -> Result<()> {
-//         let tokens = tokenize("-42")?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::Number(-42.0));
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_decimal_number() -> Result<()> {
-//         let tokens = tokenize("0.5")?;
-//         assert_eq!(tokens.len(), 1);
-//         assert_eq!(tokens[0], Token::Number(0.5));
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_leading_decimal_not_a_number() {
-//         // .5 is invalid JSON - numbers must have leading digit (0.5 is valid)
-//         let result = tokenize(".5");
-//         // Should NOT be interpreted as 0.5
-//         assert!(matches!(result, Err(JsonError::UnexpectedToken { .. })));
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::JsonError;
 
     // === Struct Usage Tests ===
 
@@ -360,6 +248,15 @@ mod tests {
         let _ = Tokenizer::new(r#""hello""#);
         // Tokenizer should be created without error
         // Internal state is private, so we test via tokenize()
+    }
+
+    #[test]
+    fn test_empty_braces() {
+        let mut tokenizer = Tokenizer::new("{}");
+        let tokens = tokenizer.tokenize().expect("Tokenize should process empty brackets");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], Token::LeftBrace);
+        assert_eq!(tokens[1], Token::RightBrace);
     }
 
     #[test]
@@ -390,6 +287,23 @@ mod tests {
     }
 
     #[test]
+    fn test_decimal_number() {
+        let mut tokenizer = Tokenizer::new("0.5");
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::Number(0.5));
+    }
+
+    #[test]
+    fn test_leading_decimal_not_a_number() {
+        // .5 is invalid JSON - numbers must have leading digit (0.5 is valid)
+        let mut tokenizer = Tokenizer::new(".5");
+        let result = tokenizer.tokenize();
+        // Should NOT be interpreted as 0.5
+        assert!(matches!(result, Err(JsonError::UnexpectedToken { .. })));
+    }
+
+    #[test]
     fn test_tokenize_literals() {
         let mut t1 = Tokenizer::new("true");
         assert_eq!(t1.tokenize().unwrap(), vec![Token::Boolean(true)]);
@@ -406,6 +320,74 @@ mod tests {
         let mut tokenizer = Tokenizer::new(r#""hello""#);
         let tokens = tokenizer.tokenize().unwrap();
         assert_eq!(tokens, vec![Token::String("hello".to_string())]);
+    }
+
+
+    #[test]
+    fn test_simple_object() {
+        let mut tokenizer = Tokenizer::new(r#"{"name": "Alice"}"#);
+        let tokens =
+            tokenizer.tokenize().expect("Tokenize should process simple object");
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0], Token::LeftBrace);
+        assert_eq!(tokens[1], Token::String("name".to_string()));
+        assert_eq!(tokens[2], Token::Colon);
+        assert_eq!(tokens[3], Token::String("Alice".to_string()));
+        assert_eq!(tokens[4], Token::RightBrace);
+    }
+
+    #[test]
+    fn test_multiple_values() {
+        let mut tokenizer = Tokenizer::new(r#"{"age": 30, "active": true}"#);
+        let tokens = tokenizer.tokenize()
+            .expect("Tokenize should process object with multiple values");
+
+        assert_eq!(tokens.len(), 9);
+        // Verify we have the right tokens
+        assert_eq!(tokens[0], Token::LeftBrace);
+        assert!(tokens.contains(&Token::String("age".to_string())));
+        assert!(tokens.contains(&Token::Number(30.0)));
+        assert!(tokens.contains(&Token::Comma));
+        assert!(tokens.contains(&Token::String("active".to_string())));
+        assert!(tokens.contains(&Token::Boolean(true)));
+        assert_eq!(tokens[8], Token::RightBrace);
+    }
+
+    // String boundary tests - verify inner vs outer quote handling
+    #[test]
+    fn test_empty_string() {
+        // Outer boundary: adjacent quotes with no inner content
+        let mut tokenizer = Tokenizer::new(r#""""#);
+        let tokens = tokenizer.tokenize().expect("Tokenize should process adjacent quotes with no inner content");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("".to_string()));
+    }
+
+    #[test]
+    fn test_string_containing_json_special_chars() {
+        // Inner handling: JSON delimiters inside strings don't break tokenization
+        let mut tokenizer = Tokenizer::new(r#""{key: value}""#);
+        let tokens = tokenizer.tokenize().expect("Tokenizer should process JSON delimiters inside string");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("{key: value}".to_string()));
+    }
+
+    #[test]
+    fn test_string_with_keyword_like_content() {
+        // Inner handling: "true", "false", "null" inside strings stay as string content
+        let mut tokenizer = Tokenizer::new(r#""not true or false""#);
+        let tokens = tokenizer.tokenize().expect("Tokenizer should handle keywords as string content");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("not true or false".to_string()));
+    }
+
+    #[test]
+    fn test_string_with_number_like_content() {
+        // Inner handling: numeric content inside strings doesn't become Number tokens
+        let mut tokenizer = Tokenizer::new(r#""phone: 555-1234""#);
+        let tokens = tokenizer.tokenize().expect("Tokenizer should handle numeric content inside string");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::String("phone: 555-1234".to_string()));
     }
 
     // === Escape Sequence Tests ===
@@ -468,37 +450,37 @@ mod tests {
 
     // === Unicode Escape Tests ===
 
-    // #[test]
-    // fn test_unicode_escape_basic() {
-    //     // \u0041 is 'A'
-    //     let mut tokenizer = Tokenizer::new(r#""\u0041""#);
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::String("A".to_string())]);
-    // }
+    #[test]
+    fn test_unicode_escape_basic() {
+        // \u0041 is 'A'
+        let mut tokenizer = Tokenizer::new(r#""\u0041""#);
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::String("A".to_string())]);
+    }
 
-    // #[test]
-    // fn test_unicode_escape_multiple() {
-    //     // \u0048\u0069 is "Hi"
-    //     let mut tokenizer = Tokenizer::new(r#""\u0048\u0069""#);
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::String("Hi".to_string())]);
-    // }
+    #[test]
+    fn test_unicode_escape_multiple() {
+        // \u0048\u0069 is "Hi"
+        let mut tokenizer = Tokenizer::new(r#""\u0048\u0069""#);
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::String("Hi".to_string())]);
+    }
 
-    // #[test]
-    // fn test_unicode_escape_mixed() {
-    //     // Mix of regular chars and unicode escapes
-    //     let mut tokenizer = Tokenizer::new(r#""Hello \u0057orld""#);
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::String("Hello World".to_string())]);
-    // }
+    #[test]
+    fn test_unicode_escape_mixed() {
+        // Mix of regular chars and unicode escapes
+        let mut tokenizer = Tokenizer::new(r#""Hello \u0057orld""#);
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::String("Hello World".to_string())]);
+    }
 
-    // #[test]
-    // fn test_unicode_escape_lowercase() {
-    //     // Lowercase hex digits should work too
-    //     let mut tokenizer = Tokenizer::new(r#""\u004a""#);
-    //     let tokens = tokenizer.tokenize().unwrap();
-    //     assert_eq!(tokens, vec![Token::String("J".to_string())]);
-    // }
+    #[test]
+    fn test_unicode_escape_lowercase() {
+        // Lowercase hex digits should work too
+        let mut tokenizer = Tokenizer::new(r#""\u004a""#);
+        let tokens = tokenizer.tokenize().unwrap();
+        assert_eq!(tokens, vec![Token::String("J".to_string())]);
+    }
 
     // === Error Tests ===
 
@@ -509,24 +491,24 @@ mod tests {
         assert!(matches!(result, Err(JsonError::InvalidEscape { .. })));
     }
 
-    // #[test]
-    // fn test_invalid_unicode_too_short() {
-    //     let mut tokenizer = Tokenizer::new(r#""\u004""#);
-    //     let result = tokenizer.tokenize();
-    //     assert!(matches!(result, Err(JsonError::InvalidUnicode { .. })));
-    // }
+    #[test]
+    fn test_invalid_unicode_too_short() {
+        let mut tokenizer = Tokenizer::new(r#""\u004""#);
+        let result = tokenizer.tokenize();
+        assert!(matches!(result, Err(JsonError::InvalidUnicode { .. })));
+    }
 
-    // #[test]
-    // fn test_invalid_unicode_bad_hex() {
-    //     let mut tokenizer = Tokenizer::new(r#""\u00GG""#);
-    //     let result = tokenizer.tokenize();
-    //     assert!(matches!(result, Err(JsonError::InvalidUnicode { .. })));
-    // }
+    #[test]
+    fn test_invalid_unicode_bad_hex() {
+        let mut tokenizer = Tokenizer::new(r#""\u00GG""#);
+        let result = tokenizer.tokenize();
+        assert!(matches!(result, Err(JsonError::InvalidUnicode { .. })));
+    }
 
-    // #[test]
-    // fn test_unterminated_string_with_escape() {
-    //     let mut tokenizer = Tokenizer::new(r#""hello\n"#);
-    //     let result = tokenizer.tokenize();
-    //     assert!(result.is_err());
-    // }
+    #[test]
+    fn test_unterminated_string_with_escape() {
+        let mut tokenizer = Tokenizer::new(r#""hello\n"#);
+        let result = tokenizer.tokenize();
+        assert!(result.is_err());
+    }
 }
