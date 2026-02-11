@@ -1,3 +1,4 @@
+use crate::Result;
 use crate::error::JsonError;
 
 /*
@@ -19,7 +20,7 @@ pub enum Token {
     Null,
 }
 
-fn unexpected_token_error<T>(found: String, position: usize) -> Result<T, JsonError> {
+fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
     Err(JsonError::UnexpectedToken {
         expected: "valid JSON token".to_string(),
         found,
@@ -83,7 +84,7 @@ impl Tokenizer {
         self.peek().is_none()
     }
 
-    fn consume_number(&mut self) -> Result<f64, JsonError> {
+    fn consume_number(&mut self) -> Result<f64> {
         let mut buffer: Vec<char> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -103,7 +104,7 @@ impl Tokenizer {
         Ok(number)
     }
 
-    fn consume_string(&mut self) -> Result<String, JsonError> {
+    fn consume_string(&mut self) -> Result<String> {
         let mut buffer: Vec<char> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -160,7 +161,7 @@ impl Tokenizer {
         })
     }
 
-    fn consume_keyword(&mut self) -> Result<Token, JsonError> {
+    fn consume_keyword(&mut self) -> Result<Token> {
         let mut buffer: Vec<char> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -186,7 +187,7 @@ impl Tokenizer {
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, JsonError> {
+    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -253,7 +254,9 @@ mod tests {
     #[test]
     fn test_empty_braces() {
         let mut tokenizer = Tokenizer::new("{}");
-        let tokens = tokenizer.tokenize().expect("Tokenize should process empty brackets");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenize should process empty brackets");
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], Token::LeftBrace);
         assert_eq!(tokens[1], Token::RightBrace);
@@ -322,12 +325,12 @@ mod tests {
         assert_eq!(tokens, vec![Token::String("hello".to_string())]);
     }
 
-
     #[test]
     fn test_simple_object() {
         let mut tokenizer = Tokenizer::new(r#"{"name": "Alice"}"#);
-        let tokens =
-            tokenizer.tokenize().expect("Tokenize should process simple object");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenize should process simple object");
         assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[0], Token::LeftBrace);
         assert_eq!(tokens[1], Token::String("name".to_string()));
@@ -339,7 +342,8 @@ mod tests {
     #[test]
     fn test_multiple_values() {
         let mut tokenizer = Tokenizer::new(r#"{"age": 30, "active": true}"#);
-        let tokens = tokenizer.tokenize()
+        let tokens = tokenizer
+            .tokenize()
             .expect("Tokenize should process object with multiple values");
 
         assert_eq!(tokens.len(), 9);
@@ -358,7 +362,9 @@ mod tests {
     fn test_empty_string() {
         // Outer boundary: adjacent quotes with no inner content
         let mut tokenizer = Tokenizer::new(r#""""#);
-        let tokens = tokenizer.tokenize().expect("Tokenize should process adjacent quotes with no inner content");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenize should process adjacent quotes with no inner content");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], Token::String("".to_string()));
     }
@@ -367,7 +373,9 @@ mod tests {
     fn test_string_containing_json_special_chars() {
         // Inner handling: JSON delimiters inside strings don't break tokenization
         let mut tokenizer = Tokenizer::new(r#""{key: value}""#);
-        let tokens = tokenizer.tokenize().expect("Tokenizer should process JSON delimiters inside string");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenizer should process JSON delimiters inside string");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], Token::String("{key: value}".to_string()));
     }
@@ -376,7 +384,9 @@ mod tests {
     fn test_string_with_keyword_like_content() {
         // Inner handling: "true", "false", "null" inside strings stay as string content
         let mut tokenizer = Tokenizer::new(r#""not true or false""#);
-        let tokens = tokenizer.tokenize().expect("Tokenizer should handle keywords as string content");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenizer should handle keywords as string content");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], Token::String("not true or false".to_string()));
     }
@@ -385,7 +395,9 @@ mod tests {
     fn test_string_with_number_like_content() {
         // Inner handling: numeric content inside strings doesn't become Number tokens
         let mut tokenizer = Tokenizer::new(r#""phone: 555-1234""#);
-        let tokens = tokenizer.tokenize().expect("Tokenizer should handle numeric content inside string");
+        let tokens = tokenizer
+            .tokenize()
+            .expect("Tokenizer should handle numeric content inside string");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], Token::String("phone: 555-1234".to_string()));
     }
