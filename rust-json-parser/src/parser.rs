@@ -17,28 +17,32 @@ impl JsonParser {
     }
 
     pub fn parse(&mut self) -> Result<JsonValue> {
-        let token = self.tokens.first().ok_or(JsonError::UnexpectedEndOfInput {
-            expected: "JSON value".to_string(),
-            position: 0,
-        })?;
-
-        match token {
-            Token::String(s) => Ok(JsonValue::String(s.clone())),
-            Token::Number(n) => Ok(JsonValue::Number(*n)),
-            Token::Boolean(b) => Ok(JsonValue::Boolean(*b)),
-            Token::Null => Ok(JsonValue::Null),
-            _ => Err(JsonError::UnexpectedToken {
-                expected: "string".to_string(),
-                found: format!("{:?}", token),
-                position: 0,
-            }),
+        // Remove clippy allow when actually looping through all the tokens
+        #[allow(clippy::never_loop)]
+        while let Some(token) = self.peek() {
+            return match token {
+                Token::String(s) => Ok(JsonValue::String(s.clone())),
+                Token::Number(n) => Ok(JsonValue::Number(n)),
+                Token::Boolean(b) => Ok(JsonValue::Boolean(b)),
+                Token::Null => Ok(JsonValue::Null),
+                _ => Err(JsonError::UnexpectedToken {
+                    expected: "string".to_string(),
+                    found: format!("{:?}", token),
+                    position: self.current,
+                }),
+            };
         }
+
+        Err(JsonError::UnexpectedEndOfInput {
+            expected: "string".to_string(),
+            position: self.current,
+        })
     }
 
     /*
      * Look at current token without advancing
      */
-    fn _peek(&self) -> Option<Token> {
+    fn peek(&self) -> Option<Token> {
         self.tokens.get(self.current).cloned()
     }
 
@@ -54,7 +58,7 @@ impl JsonParser {
      * Check if the input has been consumed
      */
     fn _is_at_end(&self) -> bool {
-        self._peek().is_none()
+        self.peek().is_none()
     }
 }
 

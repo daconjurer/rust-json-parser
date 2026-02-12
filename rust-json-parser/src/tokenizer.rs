@@ -28,7 +28,7 @@ fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
     })
 }
 
-fn resolve_escape_sequence(char: &char) -> Option<char> {
+fn resolve_escape_sequence(char: char) -> Option<char> {
     match char {
         'n' => Some('\n'),
         't' => Some('\t'),
@@ -85,33 +85,32 @@ impl Tokenizer {
     }
 
     fn consume_number(&mut self) -> Result<f64> {
-        let mut buffer: Vec<char> = Vec::new();
+        let mut number_as_string: String = String::new();
 
         while let Some(c) = self.peek() {
             if !(c.is_numeric() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') {
                 break;
             }
-            buffer.push(c);
+            number_as_string.push(c);
             self.advance();
         }
-        let number_as_string = buffer.iter().collect::<String>();
         let number = number_as_string
             .parse::<f64>()
             .map_err(|_| JsonError::InvalidNumber {
-                value: number_as_string.clone(),
-                position: 0,
+                value: number_as_string,
+                position: self.current,
             })?;
         Ok(number)
     }
 
     fn consume_string(&mut self) -> Result<String> {
-        let mut buffer: Vec<char> = Vec::new();
+        let mut consumed_string: String = String::new();
 
         while let Some(c) = self.peek() {
             match c {
                 '"' => {
                     self.advance(); // consume closing quote
-                    return Ok(buffer.iter().collect());
+                    return Ok(consumed_string);
                 }
                 '\\' => {
                     self.advance(); // consume escape character
@@ -122,34 +121,33 @@ impl Tokenizer {
                         })?;
                     // Process unicode chars
                     if special_meaning == 'u' {
-                        let mut unicode_buffer: Vec<char> = Vec::new();
+                        let mut consumed_unicode: String = String::new();
                         for _ in 0..4 {
                             let uni_char = self.advance().ok_or(JsonError::InvalidUnicode {
-                                sequence: "Unicode sequence".to_string(),
+                                sequence: format!("\\u{}", consumed_unicode),
                                 position: self.current,
                             })?;
-                            unicode_buffer.push(uni_char);
+                            consumed_unicode.push(uni_char);
                         }
-                        let unicode_sequence = parse_unicode_hex(
-                            &unicode_buffer.iter().collect::<String>(),
-                        )
-                        .ok_or(JsonError::InvalidUnicode {
-                            sequence: "Unicode sequence".to_string(),
-                            position: self.current,
-                        })?;
-                        buffer.push(unicode_sequence);
+                        let unicode_sequence = parse_unicode_hex(&consumed_unicode).ok_or(
+                            JsonError::InvalidUnicode {
+                                sequence: format!("\\u{}", consumed_unicode),
+                                position: self.current,
+                            },
+                        )?;
+                        consumed_string.push(unicode_sequence);
                     } else {
-                        let escape_sequence = resolve_escape_sequence(&special_meaning).ok_or(
+                        let escape_sequence = resolve_escape_sequence(special_meaning).ok_or(
                             JsonError::InvalidEscape {
                                 char: special_meaning,
                                 position: self.current,
                             },
                         )?;
-                        buffer.push(escape_sequence);
+                        consumed_string.push(escape_sequence);
                     }
                 }
                 _ => {
-                    buffer.push(c);
+                    consumed_string.push(c);
                     self.advance();
                 }
             }
@@ -162,16 +160,15 @@ impl Tokenizer {
     }
 
     fn consume_keyword(&mut self) -> Result<Token> {
-        let mut buffer: Vec<char> = Vec::new();
+        let mut consumed_keyword: String = String::new();
 
         while let Some(c) = self.peek() {
             if c == ',' || c == ' ' || c == '}' || c == '\n' || c == '\t' {
                 break;
             }
-            buffer.push(c);
+            consumed_keyword.push(c);
             self.advance();
         }
-        let consumed_keyword = buffer.iter().collect::<String>();
 
         match consumed_keyword.as_str() {
             "true" => Ok(Token::Boolean(true)),
