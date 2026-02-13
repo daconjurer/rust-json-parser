@@ -7,6 +7,8 @@ use std::fmt;
  * UnexpectedToken
  * UnexpectedEndOfInput
  * InvalidNumber
+ * InvalidEscape
+ * InvalidUnicode
  */
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonError {
@@ -21,6 +23,14 @@ pub enum JsonError {
     },
     InvalidNumber {
         value: String,
+        position: usize,
+    },
+    InvalidEscape {
+        char: char,
+        position: usize,
+    },
+    InvalidUnicode {
+        sequence: String,
         position: usize,
     },
 }
@@ -51,6 +61,16 @@ impl fmt::Display for JsonError {
                     f,
                     "Invalid number at position {}: value {}",
                     position, value,
+                )
+            }
+            JsonError::InvalidEscape { char, position } => {
+                write!(f, "Invalid escape at position {}: char {}", position, char,)
+            }
+            JsonError::InvalidUnicode { sequence, position } => {
+                write!(
+                    f,
+                    "Invalid Unicode sequence at position {}: sequence {}",
+                    position, sequence,
                 )
             }
         }
@@ -111,5 +131,35 @@ mod tests {
         let _ = format!("{:?}", token_error);
         let _ = format!("{:?}", eof_error);
         let _ = format!("{:?}", num_error);
+    }
+
+    #[test]
+    fn test_invalid_escape_display() {
+        let err = JsonError::InvalidEscape {
+            char: 'q',
+            position: 5,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("escape"));
+        assert!(msg.contains("q"));
+    }
+
+    #[test]
+    fn test_invalid_unicode_display() {
+        let err = JsonError::InvalidUnicode {
+            sequence: "00GG".to_string(),
+            position: 3,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("unicode") || msg.contains("Unicode"));
+    }
+
+    #[test]
+    fn test_error_is_std_error() {
+        let err = JsonError::InvalidEscape {
+            char: 'x',
+            position: 0,
+        };
+        let _: &dyn std::error::Error = &err; // Must implement Error trait
     }
 }
