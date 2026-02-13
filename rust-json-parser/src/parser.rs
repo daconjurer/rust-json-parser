@@ -25,11 +25,14 @@ impl JsonParser {
                 Token::Number(n) => Ok(JsonValue::Number(n)),
                 Token::Boolean(b) => Ok(JsonValue::Boolean(b)),
                 Token::Null => Ok(JsonValue::Null),
-                _ => Err(JsonError::UnexpectedToken {
-                    expected: "string".to_string(),
-                    found: format!("{:?}", token),
-                    position: self.current,
-                }),
+                _ => {
+                    self.advance();
+                    Err(JsonError::UnexpectedToken {
+                        expected: "string".to_string(),
+                        found: format!("{:?}", token),
+                        position: self.current,
+                    })
+                }
             };
         }
 
@@ -43,22 +46,26 @@ impl JsonParser {
      * Look at current token without advancing
      */
     fn peek(&self) -> Option<Token> {
-        self.tokens.get(self.current).cloned()
+        if !self.is_at_end() {
+            return self.tokens.get(self.current).cloned();
+        }
+        None
     }
 
     /*
      * Move forward, return previous token
      */
-    fn _advance(&mut self) -> Option<Token> {
+    fn advance(&mut self) -> Option<Token> {
+        let token = self.tokens.get(self.current).cloned();
         self.current += 1;
-        self.tokens.get(self.current - 1).cloned()
+        token
     }
 
     /*
      * Check if the input has been consumed
      */
-    fn _is_at_end(&self) -> bool {
-        self.peek().is_none()
+    fn is_at_end(&self) -> bool {
+        self.current >= self.tokens.len()
     }
 }
 
