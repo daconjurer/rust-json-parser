@@ -8,16 +8,19 @@ use crate::error::JsonError;
  */
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    LeftBrace,
-    RightBrace,
-    LeftBracket,
-    RightBracket,
-    Comma,
-    Colon,
+    // Data tokens - carry values
     String(String),
     Number(f64),
     Boolean(bool),
     Null,
+
+    // Structural tokens - organize values into containers
+    LeftBracket,  // [
+    RightBracket, // ]
+    LeftBrace,    // {
+    RightBrace,   // }
+    Colon,        // :
+    Comma,        // ,
 }
 
 fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
@@ -163,7 +166,7 @@ impl Tokenizer {
         let mut consumed_keyword: String = String::new();
 
         while let Some(c) = self.peek() {
-            if c == ',' || c == ' ' || c == '}' || c == '\n' || c == '\t' {
+            if !c.is_alphabetic() {
                 break;
             }
             consumed_keyword.push(c);
@@ -208,6 +211,14 @@ impl Tokenizer {
                 '}' => {
                     self.advance();
                     tokens.push(Token::RightBrace);
+                }
+                '[' => {
+                    self.advance();
+                    tokens.push(Token::LeftBracket);
+                }
+                ']' => {
+                    self.advance();
+                    tokens.push(Token::RightBracket);
                 }
                 ',' => {
                     self.advance();

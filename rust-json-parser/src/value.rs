@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /*
  * Enum for JsonValue kind. Valid variants:
  * String(String), Number(f64), Boolean(bool), Null
@@ -8,6 +10,8 @@ pub enum JsonValue {
     Number(f64),
     Boolean(bool),
     Null,
+    Array(Vec<JsonValue>),              // A JSON array is a Vec of values
+    Object(HashMap<String, JsonValue>), // A JSON object is a HashMap
 }
 
 impl JsonValue {
