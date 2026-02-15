@@ -22,16 +22,23 @@ fn number_to_string(input: &f64) -> String {
     }
 }
 
+fn from_json_value(input: &str) -> String {
+    format!("\"{}\"", escape_json_string(input))
+}
+
 fn object_to_string(input: &HashMap<String, JsonValue>) -> String {
     let mut array_as_string = r#"{"#.to_string();
 
-    for (key, value) in input.iter() {
-        // array_as_string.push('l');
+    for (index, (key, value)) in input.iter().enumerate() {
+        if index > 0 {
+            array_as_string.push(','); // Add comma before all but the first
+        }
+
         let value_as_string = match value {
             JsonValue::Null => "null".to_string(),
             JsonValue::Boolean(b) => b.to_string(),
             JsonValue::Number(n) => number_to_string(n),
-            JsonValue::String(s) => escape_json_string(s),
+            JsonValue::String(s) => from_json_value(s),
             JsonValue::Array(array) => array_to_string(array),
             JsonValue::Object(object) => object_to_string(object),
         };
@@ -54,7 +61,7 @@ fn array_to_string(input: &[JsonValue]) -> String {
             JsonValue::Null => "null".to_string(),
             JsonValue::Boolean(b) => b.to_string(),
             JsonValue::Number(n) => number_to_string(n),
-            JsonValue::String(s) => escape_json_string(s),
+            JsonValue::String(s) => from_json_value(s),
             JsonValue::Array(array) => array_to_string(array),
             JsonValue::Object(object) => object_to_string(object),
         };
@@ -127,7 +134,7 @@ impl fmt::Display for JsonValue {
             JsonValue::Null => write!(f, "null"),
             JsonValue::Boolean(b) => write!(f, "{}", b),
             JsonValue::Number(n) => write!(f, "{}", number_to_string(n)),
-            JsonValue::String(s) => write!(f, "\"{}\"", escape_json_string(s)),
+            JsonValue::String(s) => write!(f, "{}", from_json_value(s)),
             JsonValue::Array(array) => write!(f, "{}", array_to_string(array)),
             JsonValue::Object(object) => write!(f, "{}", object_to_string(object)),
         }
