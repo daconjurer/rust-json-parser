@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::error::JsonError;
+use crate::utils::resolve_escape_sequence;
 
 /*
  * Enum for Token kind. Valid variants:
@@ -29,20 +30,6 @@ fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
         found,
         position,
     })
-}
-
-fn resolve_escape_sequence(char: char) -> Option<char> {
-    match char {
-        'n' => Some('\n'),
-        't' => Some('\t'),
-        'r' => Some('\r'),
-        '\\' => Some('\\'),
-        '"' => Some('"'),
-        '/' => Some('/'),
-        'b' => Some('\u{0008}'), // backspace
-        'f' => Some('\u{000C}'), // form feed
-        _ => None,
-    }
 }
 
 fn parse_unicode_hex(s: &str) -> Option<char> {

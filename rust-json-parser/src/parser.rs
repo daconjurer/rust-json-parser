@@ -622,19 +622,19 @@ mod tests {
         assert_eq!(value, expected);
     }
 
-    // #[test]
-    // fn test_array_accessor() {
-    //     let value = parse_json("[1, 2, 3]").unwrap();
-    //     let arr = value.as_array().unwrap();
-    //     assert_eq!(arr.len(), 3);
-    // }
+    #[test]
+    fn test_array_accessor() {
+        let value = parse_json("[1, 2, 3]").unwrap();
+        let arr = value.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+    }
 
-    // #[test]
-    // fn test_array_get_index() {
-    //     let value = parse_json("[10, 20, 30]").unwrap();
-    //     assert_eq!(value.get_index(1), Some(&JsonValue::Number(20.0)));
-    //     assert_eq!(value.get_index(5), None);
-    // }
+    #[test]
+    fn test_array_get_index() {
+        let value = parse_json("[10, 20, 30]").unwrap();
+        assert_eq!(value.get_index(1), Some(&JsonValue::Number(20.0)));
+        assert_eq!(value.get_index(5), None);
+    }
 
     // === Objects Tests ===
 
@@ -704,17 +704,31 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_object_accessor() {
-    //     let value = parse_json(r#"{"name": "test"}"#).unwrap();
-    //     let obj = value.as_object().unwrap();
-    //     assert_eq!(obj.len(), 1);
-    // }
+    #[test]
+    fn test_object_accessor() {
+        let value = parse_json(r#"{"name": "test"}"#).unwrap();
+        let obj = value.as_object().unwrap();
+        assert_eq!(obj.len(), 1);
+    }
 
-    // #[test]
-    // fn test_object_get() {
-    //     let value = parse_json(r#"{"name": "Alice", "age": 30}"#).unwrap();
-    //     assert_eq!(value.get("name"), Some(&JsonValue::String("Alice".to_string())));
-    //     assert_eq!(value.get("missing"), None);
-    // }
+    #[test]
+    fn test_object_get() {
+        let value = parse_json(r#"{"name": "Alice", "age": 30}"#).unwrap();
+        assert_eq!(
+            value.get("name"),
+            Some(&JsonValue::String("Alice".to_string()))
+        );
+        assert_eq!(value.get("missing"), None);
+    }
+
+    // === Serialization Tests ===
+
+    #[test]
+    fn test_display_nested() {
+        let value = parse_json(r#"{"arr": [1, 2]}"#).unwrap();
+        let output = value.to_string();
+        // Object key order may vary, so check components
+        assert!(output.contains("\"arr\""));
+        assert!(output.contains("[1,2]"));
+    }
 }

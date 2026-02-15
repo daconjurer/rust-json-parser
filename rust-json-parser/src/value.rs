@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use crate::utils::escape_json_string;
+use std::{collections::HashMap, fmt};
 
 /*
  * Enum for JsonValue kind. Valid variants:
@@ -12,6 +13,55 @@ pub enum JsonValue {
     Null,
     Array(Vec<JsonValue>),              // A JSON array is a Vec of values
     Object(HashMap<String, JsonValue>), // A JSON object is a HashMap
+}
+
+fn number_to_string(input: &f64) -> String {
+    match input.trunc() == *input {
+        true => format!("{}", input.trunc()),
+        false => format!("{}", input),
+    }
+}
+
+fn object_to_string(input: &HashMap<String, JsonValue>) -> String {
+    let mut array_as_string = r#"{"#.to_string();
+
+    for (key, value) in input.iter() {
+        // array_as_string.push('l');
+        let value_as_string = match value {
+            JsonValue::Null => "null".to_string(),
+            JsonValue::Boolean(b) => b.to_string(),
+            JsonValue::Number(n) => number_to_string(n),
+            JsonValue::String(s) => escape_json_string(s),
+            JsonValue::Array(array) => array_to_string(array),
+            JsonValue::Object(object) => object_to_string(object),
+        };
+        let item_as_string = format!("\"{}\": {}", key, value_as_string);
+        array_as_string.push_str(&item_as_string);
+    }
+    array_as_string.push('}');
+    array_as_string
+}
+
+fn array_to_string(input: &[JsonValue]) -> String {
+    let mut array_as_string = r#"["#.to_string();
+
+    for (index, item) in input.iter().enumerate() {
+        if index > 0 {
+            array_as_string.push(','); // Add comma before all but the first
+        }
+
+        let item_as_string = match item {
+            JsonValue::Null => "null".to_string(),
+            JsonValue::Boolean(b) => b.to_string(),
+            JsonValue::Number(n) => number_to_string(n),
+            JsonValue::String(s) => escape_json_string(s),
+            JsonValue::Array(array) => array_to_string(array),
+            JsonValue::Object(object) => object_to_string(object),
+        };
+        array_as_string.push_str(&item_as_string);
+    }
+    array_as_string.push(']');
+    array_as_string
 }
 
 impl JsonValue {
@@ -40,15 +90,49 @@ impl JsonValue {
         Some(*b)
     }
 
-    // pub fn as_array(&self) -> Option<&Vec<JsonValue>> { /* ... */ }
-    // pub fn as_object(&self) -> Option<&HashMap<String, JsonValue>> { /* ... */ }
-    // pub fn get(&self, key: &str) -> Option<&JsonValue> { /* ... */ }
-    // pub fn get_index(&self, index: usize) -> Option<&JsonValue> { /* ... */ }
+    pub fn as_array(&self) -> Option<&Vec<JsonValue>> {
+        match self {
+            JsonValue::Array(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&HashMap<String, JsonValue>> {
+        match self {
+            JsonValue::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&JsonValue> {
+        let object = self.as_object();
+        match object {
+            Some(o) => o.get(key),
+            None => None,
+        }
+    }
+
+    pub fn get_index(&self, index: usize) -> Option<&JsonValue> {
+        let array = self.as_array();
+        match array {
+            Some(a) => a.get(index),
+            None => None,
+        }
+    }
 }
 
-// impl fmt::Display for JsonValue {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { /* ... */ }
-// }
+impl fmt::Display for JsonValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JsonValue::Null => write!(f, "null"),
+            JsonValue::Boolean(b) => write!(f, "{}", b),
+            JsonValue::Number(n) => write!(f, "{}", number_to_string(n)),
+            JsonValue::String(s) => write!(f, "\"{}\"", escape_json_string(s)),
+            JsonValue::Array(array) => write!(f, "{}", array_to_string(array)),
+            JsonValue::Object(object) => write!(f, "{}", object_to_string(object)),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -100,49 +184,40 @@ mod tests {
         assert_ne!(JsonValue::Number(1.0), JsonValue::Number(2.0));
     }
 
-    // #[test]
-    // fn test_display_primitives() {
-    //     assert_eq!(JsonValue::Null.to_string(), "null");
-    //     assert_eq!(JsonValue::Boolean(true).to_string(), "true");
-    //     assert_eq!(JsonValue::Boolean(false).to_string(), "false");
-    //     assert_eq!(JsonValue::Number(42.0).to_string(), "42");
-    //     assert_eq!(JsonValue::Number(3.14).to_string(), "3.14");
-    //     assert_eq!(JsonValue::String("hello".to_string()).to_string(), "\"hello\"");
-    // }
+    #[test]
+    fn test_display_primitives() {
+        assert_eq!(JsonValue::Null.to_string(), "null");
+        assert_eq!(JsonValue::Boolean(true).to_string(), "true");
+        assert_eq!(JsonValue::Boolean(false).to_string(), "false");
+        assert_eq!(JsonValue::Number(42.0).to_string(), "42");
+        assert_eq!(JsonValue::Number(3.14).to_string(), "3.14");
+        assert_eq!(
+            JsonValue::String("hello".to_string()).to_string(),
+            "\"hello\""
+        );
+    }
 
-    // #[test]
-    // fn test_display_array() {
-    //     let value = JsonValue::Array(vec![
-    //         JsonValue::Number(1.0),
-    //         JsonValue::Number(2.0),
-    //     ]);
-    //     assert_eq!(value.to_string(), "[1,2]");
-    // }
+    #[test]
+    fn test_display_array() {
+        let value = JsonValue::Array(vec![JsonValue::Number(1.0), JsonValue::Number(2.0)]);
+        assert_eq!(value.to_string(), "[1,2]");
+    }
 
-    // #[test]
-    // fn test_display_empty_containers() {
-    //     assert_eq!(JsonValue::Array(vec![]).to_string(), "[]");
-    //     assert_eq!(JsonValue::Object(HashMap::new()).to_string(), "{}");
-    // }
+    #[test]
+    fn test_display_empty_containers() {
+        assert_eq!(JsonValue::Array(vec![]).to_string(), "[]");
+        assert_eq!(JsonValue::Object(HashMap::new()).to_string(), "{}");
+    }
 
-    // #[test]
-    // fn test_display_escape_string() {
-    //     let value = JsonValue::String("hello\nworld".to_string());
-    //     assert_eq!(value.to_string(), "\"hello\\nworld\"");
-    // }
+    #[test]
+    fn test_display_escape_string() {
+        let value = JsonValue::String("hello\nworld".to_string());
+        assert_eq!(value.to_string(), "\"hello\\nworld\"");
+    }
 
-    // #[test]
-    // fn test_display_escape_quotes() {
-    //     let value = JsonValue::String("say \"hi\"".to_string());
-    //     assert_eq!(value.to_string(), "\"say \\\"hi\\\"\"");
-    // }
-
-    // #[test]
-    // fn test_display_nested() {
-    //     let value = parse_json(r#"{"arr": [1, 2]}"#).unwrap();
-    //     let output = value.to_string();
-    //     // Object key order may vary, so check components
-    //     assert!(output.contains("\"arr\""));
-    //     assert!(output.contains("[1,2]"));
-    // }
+    #[test]
+    fn test_display_escape_quotes() {
+        let value = JsonValue::String("say \"hi\"".to_string());
+        assert_eq!(value.to_string(), "\"say \\\"hi\\\"\"");
+    }
 }
