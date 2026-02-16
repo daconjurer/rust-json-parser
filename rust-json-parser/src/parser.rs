@@ -1,24 +1,116 @@
 use std::collections::HashMap;
 
-use crate::Result;
-use crate::error::JsonError;
+use crate::JsonResult;
+use crate::error::{unexpected_end_of_input, unexpected_token_error};
 use crate::tokenizer::{Token, Tokenizer};
 use crate::value::JsonValue;
 
+/*
+ * Checks if a token and an expected_token are structurally (regardless of the data) equal
+*/
+fn check_if_variant(token: &Token, expected_token: &Token) -> bool {
+    *token == *expected_token
+}
+
+/*
+ * Utility function to error upon missing expected comma
+*/
+fn err_on_missing_expected_comma(
+    expected_comma: bool,
+    found: &str,
+    position: usize,
+) -> JsonResult<()> {
+    if expected_comma {
+        return Err(unexpected_token_error(",", found, position));
+    }
+    Ok(())
+}
+
+/*
+ * Utility function to error upon finding an unexpected JSON value before a colon
+*/
+fn err_on_unexpected_value_before_colon(
+    colon_found: bool,
+    found: &str,
+    position: usize,
+) -> JsonResult<()> {
+    if !colon_found {
+        return Err(unexpected_token_error("string", found, position));
+    }
+    Ok(())
+}
+
+/*
+ * Utility function to check if the next token is an expected colon
+*/
+fn next_token_is_expected_colon(
+    colon_found: bool,
+    next_token: &Token,
+    position: usize,
+) -> JsonResult<bool> {
+    if colon_found {
+        return Ok(false);
+    }
+
+    if next_token != &Token::Colon {
+        return Err(unexpected_token_error(
+            ":",
+            &format!("{:?}", next_token),
+            position,
+        ));
+    }
+
+    Ok(true)
+}
+
+/*
+ * Utility function to error upon finding unexpected comma
+*/
+fn err_on_unexpected_comma(
+    expected_comma: bool,
+    expected: &str,
+    position: usize,
+) -> JsonResult<()> {
+    if !expected_comma {
+        return Err(unexpected_token_error(expected, ",", position));
+    }
+    Ok(())
+}
+
+/*
+ * Utility function to error upon finding unexpected closing token
+*/
+fn err_on_unexpected_closing_token(
+    token: &Token,
+    expected_token: &Token,
+    expected: &str,
+    found: &str,
+    position: usize,
+) -> JsonResult<()> {
+    if check_if_variant(token, expected_token) {
+        return Err(unexpected_token_error(expected, found, position));
+    }
+    Ok(())
+}
+
 pub struct JsonParser {
-    pub tokens: Vec<Token>, // TODO make me private
-    #[allow(unused)]
+    tokens: Vec<Token>,
     current: usize,
 }
 
 impl JsonParser {
-    pub fn new(input: &str) -> Result<Self> {
+    pub fn new(input: &str) -> JsonResult<Self> {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize()?;
         Ok(Self { current: 0, tokens })
     }
 
-    pub fn parse(&mut self) -> Result<JsonValue> {
+    // TODO: remove me after testing
+    pub fn get_tokens(&self) -> Vec<Token> {
+        self.tokens.clone()
+    }
+
+    pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
             Some(Token::LeftBrace) => self.parse_object(),
             Some(Token::LeftBracket) => {
@@ -26,32 +118,35 @@ impl JsonParser {
                 self.parse_array()
             }
             Some(_) => self.parse_primitive(),
-            None => Err(JsonError::UnexpectedEndOfInput {
-                expected: "string".to_string(),
-                position: self.current,
-            }),
+            None => Err(unexpected_end_of_input("string", self.current)),
         }
     }
 
-    fn parse_primitive(&mut self) -> Result<JsonValue> {
+    /*
+     * Parses a JSON primitive type (string, number, boolean or null)
+     */
+    fn parse_primitive(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
             Some(Token::String(s)) => Ok(JsonValue::String(s.clone())),
             Some(Token::Number(n)) => Ok(JsonValue::Number(*n)),
             Some(Token::Boolean(b)) => Ok(JsonValue::Boolean(*b)),
             Some(Token::Null) => Ok(JsonValue::Null),
-            Some(_) => Err(JsonError::UnexpectedToken {
-                expected: "string".to_string(),
-                found: "TODO token to_string()".to_string(),
-                position: self.current,
-            }),
-            None => Err(JsonError::UnexpectedEndOfInput {
-                expected: "string".to_string(),
-                position: self.current,
-            }),
+            Some(token) => Err(unexpected_token_error(
+                "string",
+                &format!("{:?}", token),
+                self.current,
+            )),
+            None => Err(unexpected_end_of_input("string", self.current)),
         }
     }
 
-    fn parse_array(&mut self) -> Result<JsonValue> {
+    /*
+     * Parses an array recursively, handling any valid JSON values.
+     *
+     * As array nesting produces the following string pattern: "[[", this method
+     * requires the opening bracket to be consumed beforehand.
+     */
+    fn parse_array(&mut self) -> JsonResult<JsonValue> {
         let mut array = Vec::new();
         let mut expect_comma = false;
 
@@ -59,13 +154,11 @@ impl JsonParser {
             match token {
                 // Start of array
                 Token::LeftBracket => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     self.advance(); // Consume opening [
                     let nested_array = self.parse_array()?;
@@ -79,65 +172,55 @@ impl JsonParser {
                 }
                 // Start of object (opening { is consumed by parse_object())
                 Token::LeftBrace => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     let nested_object = self.parse_object()?;
                     array.push(nested_object);
                     expect_comma = true;
                 }
                 Token::String(s) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     array.push(JsonValue::String(s.clone()));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Number(n) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     array.push(JsonValue::Number(*n));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Boolean(b) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     array.push(JsonValue::Boolean(*b));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Null => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     array.push(JsonValue::Null);
                     self.advance();
@@ -145,39 +228,41 @@ impl JsonParser {
                 }
                 Token::Comma => {
                     self.advance(); // Consume comma
-                    if !expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "closing bracket".to_string(),
-                            found: ",".to_string(),
-                            position: self.current,
-                        });
-                    }
-                    if matches!(self.peek(), Some(Token::RightBracket)) {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "string, bool, number or object".to_string(),
-                            found: "}".to_string(),
-                            position: self.current,
-                        });
-                    }
+                    let token = self.peek().ok_or(unexpected_end_of_input(
+                        "string, bool, number or object",
+                        self.current,
+                    ))?;
+
+                    err_on_unexpected_comma(expect_comma, "closing bracket", self.current)?;
+                    err_on_unexpected_closing_token(
+                        token,
+                        &Token::RightBracket,
+                        "string, bool, number or object",
+                        "]",
+                        self.current,
+                    )?;
                     expect_comma = false;
                 }
                 _ => {
-                    return Err(JsonError::UnexpectedToken {
-                        expected: "valid JSON value".to_string(),
-                        found: format!("{:?}", token),
-                        position: self.current,
-                    });
+                    return Err(unexpected_token_error(
+                        "valid JSON value",
+                        &format!("{:?}", token),
+                        self.current,
+                    ));
                 }
             };
         }
 
-        Err(JsonError::UnexpectedEndOfInput {
-            expected: "closing bracket".to_string(),
-            position: self.current,
-        })
+        Err(unexpected_end_of_input("closing bracket", self.current))
     }
 
-    fn parse_object(&mut self) -> Result<JsonValue> {
+    /*
+     * Parses an object recursively, handling any valid JSON values.
+     *
+     * As object nesting never produces a string pattern: "{{", this method
+     * consumes the opening brace.
+     */
+    fn parse_object(&mut self) -> JsonResult<JsonValue> {
         let mut key = String::new();
         let mut object = HashMap::new();
         let mut colon_found = false;
@@ -187,13 +272,11 @@ impl JsonParser {
             match token {
                 // Start of object
                 Token::LeftBrace => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     self.advance(); // Consume opening {
                     if colon_found {
@@ -210,13 +293,11 @@ impl JsonParser {
                 }
                 // Start of array (end of array is handled in parse_array())
                 Token::LeftBracket => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
                     if colon_found {
                         self.advance(); // Consume opening [
@@ -228,26 +309,27 @@ impl JsonParser {
                 }
                 // Key or string value
                 Token::String(s) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
 
-                    // Key
-                    if !colon_found {
-                        // Check if next token is a colon
-                        if self.get_token(self.current + 1) != Some(&Token::Colon) {
-                            return Err(JsonError::UnexpectedToken {
-                                expected: ":".to_string(),
-                                found: "TODO token to_string()".to_string(),
-                                position: self.current,
-                            });
-                        }
+                    // Unexpected end of input
+                    let next_token =
+                        self.get_token(self.current + 1)
+                            .ok_or(unexpected_end_of_input(
+                                match colon_found {
+                                    true => ",",
+                                    false => ":",
+                                },
+                                self.current,
+                            ))?;
+
+                    // All good! Key?
+                    if next_token_is_expected_colon(colon_found, next_token, self.current)? {
                         key = s.clone();
-                    // Value
+                    // Or value?
                     } else {
                         object.insert(key.clone(), JsonValue::String(s.clone()));
                         colon_found = false;
@@ -256,69 +338,53 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Number(n) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
+                    err_on_unexpected_value_before_colon(
+                        colon_found,
+                        &n.to_string(),
+                        self.current,
+                    )?;
 
-                    if !colon_found {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "string".to_string(),
-                            found: n.to_string(),
-                            position: self.current,
-                        });
-                    } else {
-                        object.insert(key.clone(), JsonValue::Number(*n));
-                        colon_found = false;
-                        expect_comma = true;
-                    }
+                    object.insert(key.clone(), JsonValue::Number(*n));
+                    colon_found = false;
+                    expect_comma = true;
+
                     self.advance();
                 }
                 Token::Boolean(b) => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
+                    err_on_unexpected_value_before_colon(
+                        colon_found,
+                        &b.to_string(),
+                        self.current,
+                    )?;
 
-                    if !colon_found {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "string".to_string(),
-                            found: b.to_string(),
-                            position: self.current,
-                        });
-                    } else {
-                        object.insert(key.clone(), JsonValue::Boolean(*b));
-                        colon_found = false;
-                        expect_comma = true;
-                    }
+                    object.insert(key.clone(), JsonValue::Boolean(*b));
+                    colon_found = false;
+                    expect_comma = true;
+
                     self.advance();
                 }
                 Token::Null => {
-                    if expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: ",".to_string(),
-                            found: format!("{:?}", token),
-                            position: self.current,
-                        });
-                    }
+                    err_on_missing_expected_comma(
+                        expect_comma,
+                        &format!("{:?}", token),
+                        self.current,
+                    )?;
+                    err_on_unexpected_value_before_colon(colon_found, "null", self.current)?;
 
-                    if !colon_found {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "string".to_string(),
-                            found: "null".to_string(),
-                            position: self.current,
-                        });
-                    } else {
-                        object.insert(key.clone(), JsonValue::Null);
-                        colon_found = false;
-                        expect_comma = true;
-                    }
+                    object.insert(key.clone(), JsonValue::Null);
+                    colon_found = false;
+                    expect_comma = true;
+
                     self.advance();
                 }
                 Token::Colon => {
@@ -327,36 +393,32 @@ impl JsonParser {
                 }
                 Token::Comma => {
                     self.advance(); // Consume comma
-                    if !expect_comma {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "closing brace".to_string(),
-                            found: ",".to_string(),
-                            position: self.current,
-                        });
-                    }
-                    if matches!(self.peek(), Some(Token::RightBrace)) {
-                        return Err(JsonError::UnexpectedToken {
-                            expected: "string".to_string(),
-                            found: "}".to_string(),
-                            position: self.current,
-                        });
-                    }
+                    let token = self.peek().ok_or(unexpected_end_of_input(
+                        "string, bool, number or object",
+                        self.current,
+                    ))?;
+
+                    err_on_unexpected_comma(expect_comma, "closing brace", self.current)?;
+                    err_on_unexpected_closing_token(
+                        token,
+                        &Token::RightBrace,
+                        "string",
+                        "}",
+                        self.current,
+                    )?;
                     expect_comma = false;
                 }
                 _ => {
-                    return Err(JsonError::UnexpectedToken {
-                        expected: "valid JSON value".to_string(),
-                        found: format!("{:?}", token),
-                        position: self.current,
-                    });
+                    return Err(unexpected_token_error(
+                        "valid JSON value",
+                        &format!("{:?}", token),
+                        self.current,
+                    ));
                 }
             };
         }
 
-        Err(JsonError::UnexpectedEndOfInput {
-            expected: "closing brace".to_string(),
-            position: self.current,
-        })
+        Err(unexpected_end_of_input("closing brace", self.current))
     }
 
     /*
@@ -369,6 +431,9 @@ impl JsonParser {
         None
     }
 
+    /*
+     * Get a token by index (useful to look further ahead)
+     */
     fn get_token(&self, index: usize) -> Option<&Token> {
         self.tokens.get(index)
     }
@@ -390,13 +455,14 @@ impl JsonParser {
     }
 }
 
-pub fn parse_json(input: &str) -> Result<JsonValue> {
+pub fn parse_json(input: &str) -> JsonResult<JsonValue> {
     JsonParser::new(input)?.parse()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::JsonError;
 
     // === Struct Usage Tests ===
 

@@ -15,60 +15,73 @@ pub enum JsonValue {
     Object(HashMap<String, JsonValue>), // A JSON object is a HashMap
 }
 
-fn number_to_string(input: &f64) -> String {
-    match input.trunc() == *input {
-        true => format!("{}", input.trunc()),
-        false => format!("{}", input),
-    }
+trait JsonFormat {
+    fn to_json_string(&self) -> String;
 }
 
-fn from_json_value(input: &str) -> String {
-    format!("\"{}\"", escape_json_string(input))
-}
-
-fn object_to_string(input: &HashMap<String, JsonValue>) -> String {
-    let mut array_as_string = r#"{"#.to_string();
-
-    for (index, (key, value)) in input.iter().enumerate() {
-        if index > 0 {
-            array_as_string.push(','); // Add comma before all but the first
+impl JsonFormat for f64 {
+    fn to_json_string(&self) -> String {
+        if self.trunc() == *self {
+            format!("{}", self.trunc())
+        } else {
+            format!("{}", self)
         }
-
-        let value_as_string = match value {
-            JsonValue::Null => "null".to_string(),
-            JsonValue::Boolean(b) => b.to_string(),
-            JsonValue::Number(n) => number_to_string(n),
-            JsonValue::String(s) => from_json_value(s),
-            JsonValue::Array(array) => array_to_string(array),
-            JsonValue::Object(object) => object_to_string(object),
-        };
-        let item_as_string = format!("\"{}\": {}", key, value_as_string);
-        array_as_string.push_str(&item_as_string);
     }
-    array_as_string.push('}');
-    array_as_string
 }
 
-fn array_to_string(input: &[JsonValue]) -> String {
-    let mut array_as_string = r#"["#.to_string();
-
-    for (index, item) in input.iter().enumerate() {
-        if index > 0 {
-            array_as_string.push(','); // Add comma before all but the first
-        }
-
-        let item_as_string = match item {
-            JsonValue::Null => "null".to_string(),
-            JsonValue::Boolean(b) => b.to_string(),
-            JsonValue::Number(n) => number_to_string(n),
-            JsonValue::String(s) => from_json_value(s),
-            JsonValue::Array(array) => array_to_string(array),
-            JsonValue::Object(object) => object_to_string(object),
-        };
-        array_as_string.push_str(&item_as_string);
+impl JsonFormat for String {
+    fn to_json_string(&self) -> String {
+        format!("\"{}\"", escape_json_string(self))
     }
-    array_as_string.push(']');
-    array_as_string
+}
+
+impl JsonFormat for HashMap<String, JsonValue> {
+    fn to_json_string(&self) -> String {
+        let mut array_as_string = r#"{"#.to_string();
+
+        for (index, (key, value)) in self.iter().enumerate() {
+            if index > 0 {
+                array_as_string.push(','); // Add comma before all but the first
+            }
+
+            let value_as_string = match value {
+                JsonValue::Null => "null".to_string(),
+                JsonValue::Boolean(b) => b.to_string(),
+                JsonValue::Number(n) => n.to_json_string(),
+                JsonValue::String(s) => s.to_json_string(),
+                JsonValue::Array(array) => array.to_json_string(),
+                JsonValue::Object(_) => self.to_json_string(),
+            };
+            let item_as_string = format!("\"{}\": {}", key, value_as_string);
+            array_as_string.push_str(&item_as_string);
+        }
+        array_as_string.push('}');
+        array_as_string
+    }
+}
+
+impl JsonFormat for [JsonValue] {
+    fn to_json_string(&self) -> String {
+        let mut array_as_string = r#"["#.to_string();
+
+        for (index, item) in self.iter().enumerate() {
+            if index > 0 {
+                array_as_string.push(','); // Add comma before all but the first
+            }
+
+            let item_as_string = match item {
+                JsonValue::Null => "null".to_string(),
+                JsonValue::Boolean(b) => b.to_string(),
+                JsonValue::Number(n) => n.to_json_string(),
+                JsonValue::String(s) => s.to_json_string(),
+                JsonValue::Array(_) => self.to_json_string(),
+                JsonValue::Object(object) => object.to_json_string(),
+            };
+            array_as_string.push_str(&item_as_string);
+        }
+        array_as_string.push(']');
+        array_as_string
+    }
 }
 
 impl JsonValue {
@@ -133,10 +146,10 @@ impl fmt::Display for JsonValue {
         match self {
             JsonValue::Null => write!(f, "null"),
             JsonValue::Boolean(b) => write!(f, "{}", b),
-            JsonValue::Number(n) => write!(f, "{}", number_to_string(n)),
-            JsonValue::String(s) => write!(f, "{}", from_json_value(s)),
-            JsonValue::Array(array) => write!(f, "{}", array_to_string(array)),
-            JsonValue::Object(object) => write!(f, "{}", object_to_string(object)),
+            JsonValue::Number(n) => write!(f, "{}", n.to_json_string()),
+            JsonValue::String(s) => write!(f, "{}", s.to_json_string()),
+            JsonValue::Array(array) => write!(f, "{}", array.to_json_string()),
+            JsonValue::Object(object) => write!(f, "{}", object.to_json_string()),
         }
     }
 }

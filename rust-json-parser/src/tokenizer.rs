@@ -1,5 +1,5 @@
-use crate::Result;
-use crate::error::JsonError;
+use crate::JsonResult;
+use crate::error::{JsonError, unexpected_token_error};
 use crate::utils::resolve_escape_sequence;
 
 /*
@@ -22,14 +22,6 @@ pub enum Token {
     RightBrace,   // }
     Colon,        // :
     Comma,        // ,
-}
-
-fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
-    Err(JsonError::UnexpectedToken {
-        expected: "valid JSON token".to_string(),
-        found,
-        position,
-    })
 }
 
 fn parse_unicode_hex(s: &str) -> Option<char> {
@@ -74,7 +66,7 @@ impl Tokenizer {
         self.peek().is_none()
     }
 
-    fn consume_number(&mut self) -> Result<f64> {
+    fn consume_number(&mut self) -> JsonResult<f64> {
         let mut number_as_string: String = String::new();
 
         while let Some(c) = self.peek() {
@@ -93,7 +85,7 @@ impl Tokenizer {
         Ok(number)
     }
 
-    fn consume_string(&mut self) -> Result<String> {
+    fn consume_string(&mut self) -> JsonResult<String> {
         let mut consumed_string: String = String::new();
 
         while let Some(c) = self.peek() {
@@ -149,7 +141,7 @@ impl Tokenizer {
         })
     }
 
-    fn consume_keyword(&mut self) -> Result<Token> {
+    fn consume_keyword(&mut self) -> JsonResult<Token> {
         let mut consumed_keyword: String = String::new();
 
         while let Some(c) = self.peek() {
@@ -169,12 +161,12 @@ impl Tokenizer {
                     Some(first) => first.to_string(),
                     None => "unknown".to_string(),
                 };
-                unexpected_token_error(found, 0)
+                Err(unexpected_token_error("Valid JSON value", &found, 0))
             }
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
+    pub fn tokenize(&mut self) -> JsonResult<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -221,7 +213,11 @@ impl Tokenizer {
                 }
                 _ => {
                     if c.is_ascii_punctuation() {
-                        return unexpected_token_error(c.to_string(), 0);
+                        return Err(unexpected_token_error(
+                            "Valid JSON value",
+                            &c.to_string(),
+                            0,
+                        ));
                     }
                     self.advance();
                 }
