@@ -106,10 +106,7 @@ impl JsonParser {
     pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
             Some(Token::LeftBrace) => self.parse_object(),
-            Some(Token::LeftBracket) => {
-                self.advance(); // Consume opening [
-                self.parse_array()
-            }
+            Some(Token::LeftBracket) => self.parse_array(),
             Some(_) => self.parse_primitive(),
             None => Err(unexpected_end_of_input("string", self.current)),
         }
@@ -140,6 +137,7 @@ impl JsonParser {
      * requires the opening bracket to be consumed beforehand.
      */
     fn parse_array(&mut self) -> JsonResult<JsonValue> {
+        self.advance(); // Consume opening [
         let mut array = Vec::new();
         let mut expect_comma = false;
 
@@ -153,7 +151,6 @@ impl JsonParser {
                         self.current,
                     )?;
 
-                    self.advance(); // Consume opening [
                     let nested_array = self.parse_array()?;
                     array.push(nested_array);
                     expect_comma = true;
@@ -256,6 +253,7 @@ impl JsonParser {
      * consumes the opening brace.
      */
     fn parse_object(&mut self) -> JsonResult<JsonValue> {
+        self.advance(); // Consume opening {
         let mut key = String::new();
         let mut object = HashMap::new();
         let mut colon_found = false;
@@ -271,7 +269,6 @@ impl JsonParser {
                         self.current,
                     )?;
 
-                    self.advance(); // Consume opening {
                     if colon_found {
                         let nested_object = self.parse_object()?;
                         object.insert(key.clone(), nested_object);
@@ -293,7 +290,6 @@ impl JsonParser {
                     )?;
 
                     if colon_found {
-                        self.advance(); // Consume opening [
                         let array = self.parse_array()?;
                         object.insert(key.clone(), array);
                         colon_found = false;
