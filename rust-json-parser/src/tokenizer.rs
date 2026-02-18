@@ -1,34 +1,7 @@
-use crate::Result;
-use crate::error::JsonError;
+use crate::error::unexpected_token_error;
+use crate::{JsonError, JsonResult};
 
-/*
- * Enum for Token kind. Valid variants:
- * LeftBrace, RightBrace, LeftBracket, RightBracket, Comma, Colon
- * String(String), Number(f64), Boolean(bool), Null
- */
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    LeftBrace,
-    RightBrace,
-    LeftBracket,
-    RightBracket,
-    Comma,
-    Colon,
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Null,
-}
-
-fn unexpected_token_error<T>(found: String, position: usize) -> Result<T> {
-    Err(JsonError::UnexpectedToken {
-        expected: "valid JSON token".to_string(),
-        found,
-        position,
-    })
-}
-
-fn resolve_escape_sequence(char: char) -> Option<char> {
+pub fn resolve_escape_sequence(char: char) -> Option<char> {
     match char {
         'n' => Some('\n'),
         't' => Some('\t'),
@@ -39,6 +12,34 @@ fn resolve_escape_sequence(char: char) -> Option<char> {
         'b' => Some('\u{0008}'), // backspace
         'f' => Some('\u{000C}'), // form feed
         _ => None,
+    }
+}
+
+/*
+ * Enum for Token kind. Valid variants:
+ * LeftBrace, RightBrace, LeftBracket, RightBracket, Comma, Colon
+ * String(String), Number(f64), Boolean(bool), Null
+ */
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    // Data tokens - carry values
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Null,
+
+    // Structural tokens - organize values into containers
+    LeftBracket,  // [
+    RightBracket, // ]
+    LeftBrace,    // {
+    RightBrace,   // }
+    Colon,        // :
+    Comma,        // ,
+}
+
+impl Token {
+    pub fn is_variant(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 }
 
@@ -84,7 +85,7 @@ impl Tokenizer {
         self.peek().is_none()
     }
 
-    fn consume_number(&mut self) -> Result<f64> {
+    fn consume_number(&mut self) -> JsonResult<f64> {
         let mut number_as_string: String = String::new();
 
         while let Some(c) = self.peek() {
@@ -103,7 +104,7 @@ impl Tokenizer {
         Ok(number)
     }
 
-    fn consume_string(&mut self) -> Result<String> {
+    fn consume_string(&mut self) -> JsonResult<String> {
         let mut consumed_string: String = String::new();
 
         while let Some(c) = self.peek() {
@@ -159,11 +160,11 @@ impl Tokenizer {
         })
     }
 
-    fn consume_keyword(&mut self) -> Result<Token> {
+    fn consume_keyword(&mut self) -> JsonResult<Token> {
         let mut consumed_keyword: String = String::new();
 
         while let Some(c) = self.peek() {
-            if c == ',' || c == ' ' || c == '}' || c == '\n' || c == '\t' {
+            if !c.is_alphabetic() {
                 break;
             }
             consumed_keyword.push(c);
@@ -179,12 +180,12 @@ impl Tokenizer {
                     Some(first) => first.to_string(),
                     None => "unknown".to_string(),
                 };
-                unexpected_token_error(found, 0)
+                Err(unexpected_token_error("Valid JSON value", &found, 0))
             }
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
+    pub fn tokenize(&mut self) -> JsonResult<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
 
         while let Some(c) = self.peek() {
@@ -209,6 +210,14 @@ impl Tokenizer {
                     self.advance();
                     tokens.push(Token::RightBrace);
                 }
+                '[' => {
+                    self.advance();
+                    tokens.push(Token::LeftBracket);
+                }
+                ']' => {
+                    self.advance();
+                    tokens.push(Token::RightBracket);
+                }
                 ',' => {
                     self.advance();
                     tokens.push(Token::Comma);
@@ -223,7 +232,11 @@ impl Tokenizer {
                 }
                 _ => {
                     if c.is_ascii_punctuation() {
-                        return unexpected_token_error(c.to_string(), 0);
+                        return Err(unexpected_token_error(
+                            "Valid JSON value",
+                            &c.to_string(),
+                            0,
+                        ));
                     }
                     self.advance();
                 }

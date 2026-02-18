@@ -79,6 +79,21 @@ impl fmt::Display for JsonError {
 
 impl Error for JsonError {}
 
+pub fn unexpected_token_error(expected: &str, found: &str, position: usize) -> JsonError {
+    JsonError::UnexpectedToken {
+        expected: expected.to_string(),
+        found: found.to_string(),
+        position,
+    }
+}
+
+pub fn unexpected_end_of_input(expected: &str, position: usize) -> JsonError {
+    JsonError::UnexpectedEndOfInput {
+        expected: expected.to_string(),
+        position,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
