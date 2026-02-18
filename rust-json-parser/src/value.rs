@@ -1,5 +1,21 @@
-use crate::utils::escape_json_string;
 use std::{collections::HashMap, fmt};
+
+pub fn escape_json_string(s: &str) -> String {
+    let mut result = String::new();
+    for c in s.chars() {
+        match c {
+            '"' => result.push_str("\\\""),
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\t' => result.push_str("\\t"),
+            '\r' => result.push_str("\\r"),
+            '\u{0008}' => result.push_str("\\b"),
+            '\u{000C}' => result.push_str("\\f"),
+            _ => result.push(c),
+        }
+    }
+    result
+}
 
 /*
  * Enum for JsonValue kind. Valid variants:
@@ -49,8 +65,8 @@ impl JsonFormat for HashMap<String, JsonValue> {
                 JsonValue::Boolean(b) => b.to_string(),
                 JsonValue::Number(n) => n.to_json_string(),
                 JsonValue::String(s) => s.to_json_string(),
-                JsonValue::Array(array) => array.to_json_string(),
-                JsonValue::Object(_) => self.to_json_string(),
+                JsonValue::Array(inner_array) => inner_array.to_json_string(),
+                JsonValue::Object(inner_object) => inner_object.to_json_string(),
             };
             let item_as_string = format!("\"{}\": {}", key, value_as_string);
             array_as_string.push_str(&item_as_string);
@@ -74,8 +90,8 @@ impl JsonFormat for [JsonValue] {
                 JsonValue::Boolean(b) => b.to_string(),
                 JsonValue::Number(n) => n.to_json_string(),
                 JsonValue::String(s) => s.to_json_string(),
-                JsonValue::Array(_) => self.to_json_string(),
-                JsonValue::Object(object) => object.to_json_string(),
+                JsonValue::Array(inner_array) => inner_array.to_json_string(),
+                JsonValue::Object(inner_object) => inner_object.to_json_string(),
             };
             array_as_string.push_str(&item_as_string);
         }

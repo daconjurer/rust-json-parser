@@ -1,7 +1,6 @@
 pub mod error;
 pub mod parser;
 pub mod tokenizer;
-pub mod utils;
 pub mod value;
 
 // Re-export types - make them accessible from the top level

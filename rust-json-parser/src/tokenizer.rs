@@ -1,6 +1,19 @@
-use crate::JsonResult;
-use crate::error::{JsonError, unexpected_token_error};
-use crate::utils::resolve_escape_sequence;
+use crate::error::unexpected_token_error;
+use crate::{JsonError, JsonResult};
+
+pub fn resolve_escape_sequence(char: char) -> Option<char> {
+    match char {
+        'n' => Some('\n'),
+        't' => Some('\t'),
+        'r' => Some('\r'),
+        '\\' => Some('\\'),
+        '"' => Some('"'),
+        '/' => Some('/'),
+        'b' => Some('\u{0008}'), // backspace
+        'f' => Some('\u{000C}'), // form feed
+        _ => None,
+    }
+}
 
 /*
  * Enum for Token kind. Valid variants:
@@ -22,6 +35,12 @@ pub enum Token {
     RightBrace,   // }
     Colon,        // :
     Comma,        // ,
+}
+
+impl Token {
+    pub fn is_variant(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
 }
 
 fn parse_unicode_hex(s: &str) -> Option<char> {

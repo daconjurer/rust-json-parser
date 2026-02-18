@@ -6,13 +6,6 @@ use crate::tokenizer::{Token, Tokenizer};
 use crate::value::JsonValue;
 
 /*
- * Checks if a token and an expected_token are structurally (regardless of the data) equal
-*/
-fn check_if_variant(token: &Token, expected_token: &Token) -> bool {
-    *token == *expected_token
-}
-
-/*
  * Utility function to error upon missing expected comma
 */
 fn err_on_missing_expected_comma(
@@ -87,7 +80,7 @@ fn err_on_unexpected_closing_token(
     found: &str,
     position: usize,
 ) -> JsonResult<()> {
-    if check_if_variant(token, expected_token) {
+    if token.is_variant(expected_token) {
         return Err(unexpected_token_error(expected, found, position));
     }
     Ok(())
@@ -796,5 +789,24 @@ mod tests {
         // Object key order may vary, so check components
         assert!(output.contains("\"arr\""));
         assert!(output.contains("[1,2]"));
+    }
+
+    #[test]
+    fn test_display_nested_array() {
+        let value = parse_json(r#"[[[1,2]]]"#).unwrap();
+        let output = value.to_string();
+
+        assert_eq!(output, "[[[1,2]]]");
+    }
+
+    #[test]
+    fn test_display_nested_object() {
+        let value = parse_json(r#"{"arr": {"nested": 1, "more": "end"}}"#).unwrap();
+        let output = value.to_string();
+
+        assert!(output.contains("\"arr\": {"));
+        assert!(output.contains("}}"));
+        assert!(output.contains("\"nested\": 1"));
+        assert!(output.contains("\"more\": \"end\""));
     }
 }
