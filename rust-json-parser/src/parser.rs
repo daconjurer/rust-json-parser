@@ -98,11 +98,6 @@ impl JsonParser {
         Ok(Self { current: 0, tokens })
     }
 
-    // TODO: remove me after testing
-    pub fn get_tokens(&self) -> Vec<Token> {
-        self.tokens.clone()
-    }
-
     pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
             Some(Token::LeftBrace) => self.parse_object(),
