@@ -2,8 +2,8 @@ import pytest
 
 from rust_json_parser import (
     parse_json,
-#     # parse_json_file,
-#     # dumps,
+    parse_json_file,
+    dumps,
 )
 
 
@@ -51,9 +51,9 @@ class TestErrorHandling:
         with pytest.raises(ValueError):
             parse_json('{"unclosed": "string')
 
-    # def test_file_not_found_raises_io_error(self):
-    #     with pytest.raises(IOError):
-    #         parse_json_file('/nonexistent/file.json')
+    def test_file_not_found_raises_io_error(self):
+        with pytest.raises(IOError):
+            parse_json_file('/nonexistent/file.json')
 
     def test_error_includes_position(self):
         try:
@@ -62,12 +62,12 @@ class TestErrorHandling:
             assert "position" in str(e).lower()
 
 
-# class TestSerialization:
-#     def test_dumps_basic(self):
-#         result = dumps({"key": "value"})
-#         assert '"key"' in result
-#         assert '"value"' in result
+class TestSerialization:
+    def test_dumps_basic(self):
+        result = dumps({"key": "value"})
+        assert '"key"' in result
+        assert '"value"' in result
 
-#     def test_dumps_with_indent(self):
-#         result = dumps({"key": "value"}, indent=2)
-#         assert '\n' in result
+    def test_dumps_with_indent(self):
+        result = dumps({"key": "value"}, indent=2)
+        assert "{\n  \"key\": \"value\"\n}" == result
