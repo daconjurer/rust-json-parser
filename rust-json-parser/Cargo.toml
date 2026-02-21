@@ -3,4 +3,16 @@ name = "rust-json-parser"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "rust_json_parser"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "parse_file"
+path = "src/main.rs"
+
 [dependencies]
+pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
+
+[features]
+python = ["pyo3"]

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rust-json-parser"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.maturin]
+python-source = "python"
+module-name = "rust_json_parser._rust_json_parser"
+features = ["python", "pyo3/extension-module"]
