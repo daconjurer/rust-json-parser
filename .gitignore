@@ -25,3 +25,11 @@ Thumbs.db
 
 # Dev
 **/*/notes.md
+
+
+## Python
+**/__pycache__/
+uv.lock
+
+## Maturin
+**/*.so

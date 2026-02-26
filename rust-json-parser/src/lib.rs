@@ -7,7 +7,7 @@ pub mod value;
 // Without this: users write `use my_lib::parser::parse_json`
 // With this: users write `use my_lib::parse_json` (cleaner!)
 pub use error::JsonError;
-pub use parser::JsonParser;
+pub use parser::{JsonParser, parse_json};
 pub use tokenizer::{Token, Tokenizer};
 pub use value::JsonValue;
 
@@ -60,3 +60,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(feature = "python")]
+mod python_bindings;
