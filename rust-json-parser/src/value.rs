@@ -155,6 +155,55 @@ impl JsonValue {
             None => None,
         }
     }
+
+    pub fn pretty_print(&self, indent: usize) -> String {
+        self.pretty_print_recursive(0, indent)
+    }
+
+    fn pretty_print_recursive(&self, depth: usize, indent: usize) -> String {
+        let pad = " ".repeat(depth * indent);
+        let inner_pad = " ".repeat((depth + 1) * indent);
+
+        match self {
+            JsonValue::Null => "null".to_string(),
+            JsonValue::Boolean(b) => b.to_string(),
+            JsonValue::Number(n) => n.to_json_string(),
+            JsonValue::String(s) => s.to_json_string(),
+            JsonValue::Array(arr) => {
+                if arr.is_empty() {
+                    return "[]".to_string();
+                }
+                let items: Vec<String> = arr
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{}{}",
+                            inner_pad,
+                            v.pretty_print_recursive(depth + 1, indent)
+                        )
+                    })
+                    .collect();
+                format!("[\n{}\n{}]", items.join(",\n"), pad)
+            }
+            JsonValue::Object(obj) => {
+                if obj.is_empty() {
+                    return "{}".to_string();
+                }
+                let entries: Vec<String> = obj
+                    .iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "{}\"{}\": {}",
+                            inner_pad,
+                            escape_json_string(k),
+                            v.pretty_print_recursive(depth + 1, indent)
+                        )
+                    })
+                    .collect();
+                format!("{{\n{}\n{}}}", entries.join(",\n"), pad)
+            }
+        }
+    }
 }
 
 impl fmt::Display for JsonValue {
