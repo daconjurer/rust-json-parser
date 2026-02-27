@@ -1,7 +1,7 @@
 use crate::error::unexpected_token_error;
 use crate::{JsonError, JsonResult};
 
-pub fn resolve_escape_sequence(char: char) -> Option<char> {
+fn resolve_escape_sequence(char: char) -> Option<char> {
     match char {
         'n' => Some('\n'),
         't' => Some('\t'),
@@ -15,29 +15,47 @@ pub fn resolve_escape_sequence(char: char) -> Option<char> {
     }
 }
 
-/*
- * Enum for Token kind. Valid variants:
- * LeftBrace, RightBrace, LeftBracket, RightBracket, Comma, Colon
- * String(String), Number(f64), Boolean(bool), Null
- */
+/// Represents a Token result of tokenization 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    // Data tokens - carry values
+    /// A quoted string value.
     String(String),
+    /// A numeric literal.
     Number(f64),
+    /// A `true` or `false` literal.
     Boolean(bool),
+    /// The `null` literal.
     Null,
 
-    // Structural tokens - organize values into containers
-    LeftBracket,  // [
-    RightBracket, // ]
-    LeftBrace,    // {
-    RightBrace,   // }
-    Colon,        // :
-    Comma,        // ,
+    /// Opening bracket `[`.
+    LeftBracket,
+    /// Closing bracket `]`.
+    RightBracket,
+    /// Opening brace `{`.
+    LeftBrace,
+    /// Closing brace `}`.
+    RightBrace,
+    /// Colon `:` separating keys from values.
+    Colon,
+    /// Comma `,` separating elements.
+    Comma,
 }
 
 impl Token {
+    /// Returns `true` if `self` and `other` are the same variant, ignoring inner values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::Token;
+    ///
+    /// let a = Token::String("hello".to_string());
+    /// let b = Token::String("world".to_string());
+    /// assert!(a.is_variant(&b));
+    ///
+    /// let c = Token::Number(42.0);
+    /// assert!(!a.is_variant(&c));
+    /// ```
     pub fn is_variant(&self, other: &Self) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
@@ -50,12 +68,22 @@ fn parse_unicode_hex(s: &str) -> Option<char> {
     u32::from_str_radix(s, 16).ok().and_then(char::from_u32)
 }
 
+/// A lexer that converts a JSON input string into a sequence of [`Token`]s.
 pub struct Tokenizer {
     input: Vec<char>,
     current: usize,
 }
 
 impl Tokenizer {
+    /// Creates a new `Tokenizer` for the given JSON input string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::Tokenizer;
+    ///
+    /// let tokenizer = Tokenizer::new(r#"{"key": 42}"#);
+    /// ```
     pub fn new(input: &str) -> Self {
         Self {
             current: 0,
@@ -185,6 +213,32 @@ impl Tokenizer {
         }
     }
 
+    /// Consumes the input and returns the complete list of tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::{Tokenizer, Token};
+    ///
+    /// let mut tokenizer = Tokenizer::new("[1, true]");
+    /// let tokens = tokenizer.tokenize()?;
+    /// assert_eq!(tokens, vec![
+    ///     Token::LeftBracket,
+    ///     Token::Number(1.0),
+    ///     Token::Comma,
+    ///     Token::Boolean(true),
+    ///     Token::RightBracket,
+    /// ]);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JsonError::UnexpectedToken`] if an invalid character is encountered,
+    /// [`JsonError::InvalidNumber`] if a numeric literal cannot be parsed,
+    /// [`JsonError::InvalidEscape`] if a string contains an unrecognized escape sequence,
+    /// [`JsonError::InvalidUnicode`] if a `\uXXXX` sequence is malformed, or
+    /// [`JsonError::UnexpectedEndOfInput`] if a string is unterminated.
     pub fn tokenize(&mut self) -> JsonResult<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
 

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-pub fn escape_json_string(s: &str) -> String {
+fn escape_json_string(s: &str) -> String {
     let mut result = String::new();
     for c in s.chars() {
         match c {
@@ -17,18 +17,21 @@ pub fn escape_json_string(s: &str) -> String {
     result
 }
 
-/*
- * Enum for JsonValue kind. Valid variants:
- * String(String), Number(f64), Boolean(bool), Null
- */
+/// Represents a parsed JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
+    /// A JSON string (e.g. `"hello"`).
     String(String),
+    /// A JSON number, stored as `f64` (e.g. `42`, `3.14`).
     Number(f64),
+    /// A JSON boolean (`true` or `false`).
     Boolean(bool),
+    /// The JSON `null` literal.
     Null,
-    Array(Vec<JsonValue>),              // A JSON array is a Vec of values
-    Object(HashMap<String, JsonValue>), // A JSON object is a HashMap
+    /// An ordered JSON array of values (e.g. `[1, "two", true]`).
+    Array(Vec<JsonValue>),
+    /// A JSON object mapping string keys to values (e.g. `{"key": "value"}`).
+    Object(HashMap<String, JsonValue>),
 }
 
 trait JsonFormat {
@@ -101,10 +104,38 @@ impl JsonFormat for [JsonValue] {
 }
 
 impl JsonValue {
+    /// Returns `true` if this value is `JsonValue::Null`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json("null")?;
+    /// assert!(value.is_null());
+    ///
+    /// let value = parse_json("42")?;
+    /// assert!(!value.is_null());
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn is_null(&self) -> bool {
         matches!(self, JsonValue::Null)
     }
 
+    /// Returns the inner string slice if this is a `JsonValue::String`, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json(r#""hello""#)?;
+    /// assert_eq!(value.as_str(), Some("hello"));
+    ///
+    /// let value = parse_json("42")?;
+    /// assert_eq!(value.as_str(), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn as_str(&self) -> Option<&str> {
         match self {
             JsonValue::String(s) => Some(s.as_str()),
@@ -112,6 +143,20 @@ impl JsonValue {
         }
     }
 
+    /// Returns the inner `f64` if this is a `JsonValue::Number`, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json("3.14")?;
+    /// assert_eq!(value.as_f64(), Some(3.14));
+    ///
+    /// let value = parse_json("true")?;
+    /// assert_eq!(value.as_f64(), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn as_f64(&self) -> Option<f64> {
         let JsonValue::Number(n) = self else {
             return None;
@@ -119,6 +164,20 @@ impl JsonValue {
         Some(*n)
     }
 
+    /// Returns the inner `bool` if this is a `JsonValue::Boolean`, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json("true")?;
+    /// assert_eq!(value.as_bool(), Some(true));
+    ///
+    /// let value = parse_json("42")?;
+    /// assert_eq!(value.as_bool(), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn as_bool(&self) -> Option<bool> {
         let JsonValue::Boolean(b) = self else {
             return None;
@@ -126,6 +185,20 @@ impl JsonValue {
         Some(*b)
     }
 
+    /// Returns a reference to the inner `Vec` if this is a `JsonValue::Array`, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json("[1, 2, 3]")?;
+    /// assert_eq!(value.as_array().map(|a| a.len()), Some(3));
+    ///
+    /// let value = parse_json("42")?;
+    /// assert_eq!(value.as_array(), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn as_array(&self) -> Option<&Vec<JsonValue>> {
         match self {
             JsonValue::Array(a) => Some(a),
@@ -133,6 +206,20 @@ impl JsonValue {
         }
     }
 
+    /// Returns a reference to the inner `HashMap` if this is a `JsonValue::Object`, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json(r#"{"key": "value"}"#)?;
+    /// assert_eq!(value.as_object().map(|o| o.len()), Some(1));
+    ///
+    /// let value = parse_json("[1, 2]")?;
+    /// assert_eq!(value.as_object(), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn as_object(&self) -> Option<&HashMap<String, JsonValue>> {
         match self {
             JsonValue::Object(o) => Some(o),
@@ -140,6 +227,19 @@ impl JsonValue {
         }
     }
 
+    /// Looks up a value by key if this is a `JsonValue::Object`. Returns `None` if the
+    /// key is missing or if this value is not an object.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::{parse_json, JsonValue};
+    ///
+    /// let value = parse_json(r#"{"name": "Alice", "age": 30}"#)?;
+    /// assert_eq!(value.get("name"), Some(&JsonValue::String("Alice".to_string())));
+    /// assert_eq!(value.get("missing"), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn get(&self, key: &str) -> Option<&JsonValue> {
         let object = self.as_object();
         match object {
@@ -148,6 +248,19 @@ impl JsonValue {
         }
     }
 
+    /// Looks up a value by index if this is a `JsonValue::Array`. Returns `None` if the
+    /// index is out of bounds or if this value is not an array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::{parse_json, JsonValue};
+    ///
+    /// let value = parse_json("[10, 20, 30]")?;
+    /// assert_eq!(value.get_index(1), Some(&JsonValue::Number(20.0)));
+    /// assert_eq!(value.get_index(5), None);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn get_index(&self, index: usize) -> Option<&JsonValue> {
         let array = self.as_array();
         match array {
@@ -156,10 +269,26 @@ impl JsonValue {
         }
     }
 
+    /// Serializes this value to a pretty-printed JSON string with the given number
+    /// of spaces per indentation level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::parse_json;
+    ///
+    /// let value = parse_json(r#"{"key": [1, 2]}"#)?;
+    /// let pretty = value.pretty_print(2);
+    /// assert!(pretty.contains("\"key\""));
+    /// assert!(pretty.contains('\n'));
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
     pub fn pretty_print(&self, indent: usize) -> String {
         self.pretty_print_recursive(0, indent)
     }
 
+    /// Recursive helper for [`pretty_print`](Self::pretty_print) that tracks the current
+    /// nesting depth.
     fn pretty_print_recursive(&self, depth: usize, indent: usize) -> String {
         let pad = " ".repeat(depth * indent);
         let inner_pad = " ".repeat((depth + 1) * indent);

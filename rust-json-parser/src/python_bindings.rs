@@ -1,10 +1,10 @@
 use crate::parse_json as parse;
+use crate::parse_json_file as parse_file;
 use crate::{JsonError, JsonValue};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::collections::HashMap;
-use std::fs;
 
 /// Utility function to convert a JsonValue instance (value) into a PyAny instance
 fn json_value_to_py<'py>(value: JsonValue, py: Python<'py>) -> Result<Bound<'py, PyAny>, PyErr> {
@@ -103,22 +103,89 @@ impl From<JsonError> for PyErr {
                 "Invalid unicode sequence at position {}: {}",
                 position, sequence
             )),
+            JsonError::Io { message } => PyIOError::new_err(message),
         }
     }
 }
 
+/// Parse a JSON string and return the corresponding Python object.
+///
+/// Args:
+///     input: A string containing valid JSON.
+///
+/// Returns:
+///     The parsed JSON as a Python object (dict, list, str, float, bool, or None).
+///
+/// Raises:
+///     ValueError: If the input is not valid JSON.
+///
+/// Examples:
+///     >>> parse_json('{"name": "Alice", "age": 30}')
+///     {'name': 'Alice', 'age': 30.0}
+///
+///     >>> parse_json('[1, 2, 3]')
+///     [1.0, 2.0, 3.0]
+///
+///     >>> parse_json('"hello"')
+///     'hello'
+///
+///     >>> parse_json('null')
 #[pyfunction]
 fn parse_json<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let result = parse(input)?;
     result.into_pyobject(py)
 }
 
+/// Parse a JSON file and return the corresponding Python object.
+///
+/// Args:
+///     path: Path to a file containing valid JSON.
+///
+/// Returns:
+///     The parsed JSON as a Python object (dict, list, str, float, bool, or None).
+///
+/// Raises:
+///     ValueError: If the file contents are not valid JSON.
+///     OSError: If the file cannot be read.
+///
+/// Examples:
+///     >>> parse_json_file("config.json")
+///     {'key': 'value'}
+///
+///     >>> parse_json_file("data/users.json")
+///     [{'name': 'Alice'}, {'name': 'Bob'}]
 #[pyfunction]
 fn parse_json_file<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-    let contents = fs::read_to_string(&path)?;
-    Ok(parse_json(py, &contents)?)
+    let result = parse_file(path)?;
+    result.into_pyobject(py)
 }
 
+/// Serialize a Python object to a JSON string.
+///
+/// Args:
+///     obj: A Python object to serialize (dict, list, str, float, int, bool, or None).
+///     indent: Optional number of spaces for pretty-printing. If None, output is compact.
+///
+/// Returns:
+///     A JSON string representation of the object.
+///
+/// Raises:
+///     TypeError: If the object contains types that cannot be serialized to JSON.
+///
+/// Examples:
+///     >>> dumps({"name": "Alice", "age": 30})
+///     '{"name": "Alice", "age": 30}'
+///
+///     >>> dumps([1, 2, 3])
+///     '[1, 2, 3]'
+///
+///     >>> print(dumps({"key": "value"}, indent=2))
+///     {
+///       "key": "value"
+///     }
+///
+///     >>> dumps(None)
+///     'null'
 #[pyfunction]
 #[pyo3(signature = (obj, indent=None))]
 fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
