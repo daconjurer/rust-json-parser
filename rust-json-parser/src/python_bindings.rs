@@ -1,11 +1,11 @@
 use crate::parse_json as parse;
 use crate::parse_json_file as parse_file;
-use std::time::Instant;
 use crate::{JsonError, JsonValue};
 use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::collections::HashMap;
+use std::time::Instant;
 
 /// Utility function to convert a JsonValue instance (value) into a PyAny instance
 fn json_value_to_py<'py>(value: JsonValue, py: Python<'py>) -> Result<Bound<'py, PyAny>, PyErr> {
@@ -202,7 +202,10 @@ fn median(times: &mut [f64]) -> f64 {
     if times.len() % 2 == 1 {
         times[mid]
     } else {
-        let left = *times[..mid].iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        let left = *times[..mid]
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
         (left + times[mid]) / 2.0
     }
 }

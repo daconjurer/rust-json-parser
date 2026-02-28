@@ -15,7 +15,7 @@ fn resolve_escape_sequence(char: char) -> Option<char> {
     }
 }
 
-/// Represents a Token result of tokenization 
+/// Represents a Token result of tokenization
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     /// A quoted string value.
@@ -69,12 +69,12 @@ fn parse_unicode_hex(s: &str) -> Option<char> {
 }
 
 /// A lexer that converts a JSON input string into a sequence of [`Token`]s.
-pub struct Tokenizer {
-    input: Vec<char>,
+pub struct Tokenizer<'input> {
+    input: &'input str,
     current: usize,
 }
 
-impl Tokenizer {
+impl<'input> Tokenizer<'input> {
     /// Creates a new `Tokenizer` for the given JSON input string.
     ///
     /// # Examples
@@ -84,26 +84,27 @@ impl Tokenizer {
     ///
     /// let tokenizer = Tokenizer::new(r#"{"key": 42}"#);
     /// ```
-    pub fn new(input: &str) -> Self {
+    pub fn new(input: &'input str) -> Self {
         Self {
             current: 0,
-            input: input.chars().collect(),
+            input: input,
         }
     }
 
     /*
-     * Look at current char without advancing
+     * Look at current byte
      */
     fn peek(&self) -> Option<char> {
-        self.input.get(self.current).copied()
+        self.input.as_bytes().get(self.current).map(|&b| b as char)
     }
 
     /*
      * Move forward, return previous char
      */
     fn advance(&mut self) -> Option<char> {
+        let b = self.input.as_bytes().get(self.current).copied()?;
         self.current += 1;
-        self.input.get(self.current - 1).copied()
+        Some(b as char)
     }
 
     /*
