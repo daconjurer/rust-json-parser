@@ -1,5 +1,6 @@
 use crate::parse_json as parse;
 use crate::parse_json_file as parse_file;
+use std::time::Instant;
 use crate::{JsonError, JsonValue};
 use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -195,10 +196,89 @@ fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
     }
 }
 
+fn median(times: &mut [f64]) -> f64 {
+    let mid = times.len() / 2;
+    times.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+    if times.len() % 2 == 1 {
+        times[mid]
+    } else {
+        let left = *times[..mid].iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        (left + times[mid]) / 2.0
+    }
+}
+
+/// Benchmark parse_json against json.loads and simplejson.loads.
+///
+/// All three parsers are measured doing identical work: taking a JSON string
+/// and returning Python objects. Each gets the same number of warmup and
+/// timed rounds to ensure a fair comparison. Reports the **median**
+/// per-iteration time to reduce the impact of GC pauses and other outliers.
+///
+/// Args:
+///     input: A JSON string to parse.
+///     rounds: Number of timed iterations per parser (default: 1000).
+///     warmup: Number of untimed warmup iterations per parser (default: 10).
+///
+/// Returns:
+///     A dict with median per-iteration times in seconds:
+///     ``{"rust": float, "json": float, "simplejson": float | None}``.
+#[pyfunction]
+#[pyo3(signature = (input, rounds=1000, warmup=10))]
+fn benchmark_performance<'py>(
+    py: Python<'py>,
+    input: &str,
+    rounds: u32,
+    warmup: u32,
+) -> PyResult<Bound<'py, PyDict>> {
+    let n = rounds as usize;
+
+    // --- Rust (parse + PyO3 conversion) ---
+    for _ in 0..warmup {
+        let _ = parse_json(py, input)?;
+    }
+    let mut rust_times = Vec::with_capacity(n);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        let _ = parse_json(py, input)?;
+        rust_times.push(start.elapsed().as_secs_f64());
+    }
+
+    // --- json (stdlib C implementation) ---
+    let json_loads = py.import("json")?.getattr("loads")?;
+    for _ in 0..warmup {
+        let _ = json_loads.call1((input,))?;
+    }
+    let mut json_times = Vec::with_capacity(n);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        let _ = json_loads.call1((input,))?;
+        json_times.push(start.elapsed().as_secs_f64());
+    }
+
+    // --- simplejson ---
+    let simplejson_loads = py.import("simplejson")?.getattr("loads")?;
+    for _ in 0..warmup {
+        let _ = simplejson_loads.call1((input,))?;
+    }
+    let mut simplejson_times = Vec::with_capacity(n);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        let _ = simplejson_loads.call1((input,))?;
+        simplejson_times.push(start.elapsed().as_secs_f64());
+    }
+
+    let result = PyDict::new(py);
+    result.set_item("rust", median(&mut rust_times))?;
+    result.set_item("json", median(&mut json_times))?;
+    result.set_item("simplejson", median(&mut simplejson_times))?;
+    Ok(result)
+}
+
 #[pymodule]
 fn _rust_json_parser(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json_file, m)?)?;
     m.add_function(wrap_pyfunction!(dumps, m)?)?;
+    m.add_function(wrap_pyfunction!(benchmark_performance, m)?)?;
     Ok(())
 }

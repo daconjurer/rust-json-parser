@@ -71,3 +71,17 @@ class TestSerialization:
     def test_dumps_with_indent(self):
         result = dumps({"key": "value"}, indent=2)
         assert "{\n  \"key\": \"value\"\n}" == result
+
+
+class TestBenchmark:
+    def test_benchmark_returns_tuple(self):
+        """Verify benchmark_performance returns timing tuple with all three values."""
+        from rust_json_parser import benchmark_performance
+
+        rust_time, python_json_time, simplejson_time = benchmark_performance('{"test": 1}')
+        assert isinstance(rust_time, float)
+        assert isinstance(python_json_time, float)
+        assert isinstance(simplejson_time, float)
+        assert rust_time > 0
+        assert python_json_time > 0
+        assert simplejson_time > 0
