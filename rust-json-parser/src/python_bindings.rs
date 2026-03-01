@@ -235,6 +235,17 @@ fn benchmark_performance<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let n = rounds as usize;
 
+    // --- Rust (with no bindings) ---
+    for _ in 0..warmup {
+        let _ = parse(input)?;
+    }
+    let mut pure_rust_times = Vec::with_capacity(n);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        let _ = parse(input)?;
+        pure_rust_times.push(start.elapsed().as_secs_f64());
+    }
+
     // --- simplejson ---
     let simplejson_loads = py.import("simplejson")?.getattr("loads")?;
     for _ in 0..warmup {
@@ -271,6 +282,7 @@ fn benchmark_performance<'py>(
     }
 
     let result = PyDict::new(py);
+    result.set_item("pure-rust", median(&mut pure_rust_times))?;
     result.set_item("rust", median(&mut rust_times))?;
     result.set_item("json", median(&mut json_times))?;
     result.set_item("simplejson", median(&mut simplejson_times))?;

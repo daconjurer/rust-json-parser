@@ -33,8 +33,10 @@ def _auto_rounds(size: int, requested: int) -> int:
 
 def _comparison(label: str, other_time: float, rust_time: float) -> str:
     if other_time >= rust_time:
-        return f"  {label:<20} {other_time:.6f}s  (Rust is {other_time / rust_time:.2f}x faster)"
-    return f"  {label:<20} {other_time:.6f}s  ({label.rstrip(':')} is {rust_time / other_time:.2f}x faster)"
+        pct = (other_time / rust_time - 1) * 100
+        return f"  {label:<22} {other_time:.9f}s  (Rust with bindings is {pct:.0f}% faster)"
+    pct = (rust_time / other_time - 1) * 100
+    return f"  {label:<22} {other_time:.9f}s  ({label.rstrip(':')} is {pct:.0f}% faster than Rust with Python bindings)"
 
 
 def _benchmark_file(path: str, rounds: int, warmup: int) -> None:
@@ -46,10 +48,10 @@ def _benchmark_file(path: str, rounds: int, warmup: int) -> None:
     times = benchmark_performance(raw, rounds=rounds, warmup=warmup)
 
     print(f"\n{name} ({_human_size(size)}, {rounds} rounds):")
-    print(f"  {'Rust:':<20} {times['rust']:.6f}s")
+    print(f"  {'Rust with bindings:':<22} {times['rust']:.9f}s")
+    print(_comparison("Rust:", times["pure-rust"], times["rust"]))
     print(_comparison("Python json (C):", times["json"], times["rust"]))
-    if times["simplejson"] is not None:
-        print(_comparison("simplejson:", times["simplejson"], times["rust"]))
+    print(_comparison("simplejson:", times["simplejson"], times["rust"]))
 
 
 def run_benchmark(test_data_dir: str, rounds: int, warmup: int) -> None:
@@ -58,7 +60,7 @@ def run_benchmark(test_data_dir: str, rounds: int, warmup: int) -> None:
         print(f"No JSON files found in {test_data_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Benchmarking {len(files)} files...")
+    print(f"Benchmarking {len(files)} files (including pure Rust implementation)...")
 
     for f in files:
         _benchmark_file(str(f), rounds, warmup)
@@ -108,7 +110,9 @@ def main():
 
     if args.input is None:
         if sys.stdin.isatty():
-            parser.error("no input provided (pass a file, a JSON string, or pipe to stdin)")
+            parser.error(
+                "no input provided (pass a file, a JSON string, or pipe to stdin)"
+            )
         raw = sys.stdin.read()
         result = parse_json(raw)
     elif Path(args.input).is_file():
