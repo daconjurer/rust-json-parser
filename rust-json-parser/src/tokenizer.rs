@@ -1,7 +1,7 @@
 use crate::error::unexpected_token_error;
 use crate::{JsonError, JsonResult};
 
-pub fn resolve_escape_sequence(char: char) -> Option<char> {
+fn resolve_escape_sequence(char: char) -> Option<char> {
     match char {
         'n' => Some('\n'),
         't' => Some('\t'),
@@ -15,29 +15,47 @@ pub fn resolve_escape_sequence(char: char) -> Option<char> {
     }
 }
 
-/*
- * Enum for Token kind. Valid variants:
- * LeftBrace, RightBrace, LeftBracket, RightBracket, Comma, Colon
- * String(String), Number(f64), Boolean(bool), Null
- */
+/// Represents a Token result of tokenization
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    // Data tokens - carry values
+    /// A quoted string value.
     String(String),
+    /// A numeric literal.
     Number(f64),
+    /// A `true` or `false` literal.
     Boolean(bool),
+    /// The `null` literal.
     Null,
 
-    // Structural tokens - organize values into containers
-    LeftBracket,  // [
-    RightBracket, // ]
-    LeftBrace,    // {
-    RightBrace,   // }
-    Colon,        // :
-    Comma,        // ,
+    /// Opening bracket `[`.
+    LeftBracket,
+    /// Closing bracket `]`.
+    RightBracket,
+    /// Opening brace `{`.
+    LeftBrace,
+    /// Closing brace `}`.
+    RightBrace,
+    /// Colon `:` separating keys from values.
+    Colon,
+    /// Comma `,` separating elements.
+    Comma,
 }
 
 impl Token {
+    /// Returns `true` if `self` and `other` are the same variant, ignoring inner values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::Token;
+    ///
+    /// let a = Token::String("hello".to_string());
+    /// let b = Token::String("world".to_string());
+    /// assert!(a.is_variant(&b));
+    ///
+    /// let c = Token::Number(42.0);
+    /// assert!(!a.is_variant(&c));
+    /// ```
     pub fn is_variant(&self, other: &Self) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
@@ -50,32 +68,47 @@ fn parse_unicode_hex(s: &str) -> Option<char> {
     u32::from_str_radix(s, 16).ok().and_then(char::from_u32)
 }
 
-pub struct Tokenizer {
-    input: Vec<char>,
+/// A lexer that converts a JSON input string into a sequence of [`Token`]s.
+pub struct Tokenizer<'input> {
+    input: &'input str,
     current: usize,
 }
 
-impl Tokenizer {
-    pub fn new(input: &str) -> Self {
+impl<'input> Tokenizer<'input> {
+    /// Creates a new `Tokenizer` for the given JSON input string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::Tokenizer;
+    ///
+    /// let tokenizer = Tokenizer::new(r#"{"key": 42}"#);
+    /// ```
+    pub fn new(input: &'input str) -> Self {
         Self {
             current: 0,
-            input: input.chars().collect(),
+            input: input,
         }
     }
 
     /*
-     * Look at current char without advancing
+     * Look at current byte
      */
-    fn peek(&self) -> Option<char> {
-        self.input.get(self.current).copied()
+    fn peek(&self) -> Option<&u8> {
+        self.input.as_bytes().get(self.current)
     }
 
     /*
-     * Move forward, return previous char
+     * Move forward, return previous byte
      */
-    fn advance(&mut self) -> Option<char> {
+    fn advance(&mut self) -> Option<&u8> {
+        let b = self.input.as_bytes().get(self.current)?;
         self.current += 1;
-        self.input.get(self.current - 1).copied()
+        Some(b)
+    }
+
+    fn _input_slice_to_string(&self, start: usize, end: usize) -> String {
+        self.input[start..end].to_string()
     }
 
     /*
@@ -86,69 +119,101 @@ impl Tokenizer {
     }
 
     fn consume_number(&mut self) -> JsonResult<f64> {
-        let mut number_as_string: String = String::new();
+        let start = self.current;
 
         while let Some(c) = self.peek() {
-            if !(c.is_numeric() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') {
+            if !(c.is_ascii_digit()
+                || *c == b'.'
+                || *c == b'-'
+                || *c == b'e'
+                || *c == b'E'
+                || *c == b'+')
+            {
                 break;
             }
-            number_as_string.push(c);
             self.advance();
         }
-        let number = number_as_string
-            .parse::<f64>()
-            .map_err(|_| JsonError::InvalidNumber {
-                value: number_as_string,
-                position: self.current,
-            })?;
+        let slice = &self.input[start..self.current];
+        let number = slice.parse::<f64>().map_err(|_| JsonError::InvalidNumber {
+            value: slice.to_string(),
+            position: self.current,
+        })?;
         Ok(number)
     }
 
     fn consume_string(&mut self) -> JsonResult<String> {
-        let mut consumed_string: String = String::new();
+        let start = self.current;
 
-        while let Some(c) = self.peek() {
-            match c {
-                '"' => {
-                    self.advance(); // consume closing quote
-                    return Ok(consumed_string);
+        // Fast path: scan for closing quote with no escape sequences
+        loop {
+            match self.peek() {
+                Some(b'"') => {
+                    let s = self._input_slice_to_string(start, self.current);
+                    self.advance(); // Consume closing quote
+                    return Ok(s);
                 }
-                '\\' => {
+                Some(b'\\') => {
+                    // Copy what we've scanned so far and switch to slow path
+                    let mut s: String = self._input_slice_to_string(start, self.current);
+                    return self.consume_string_slow(&mut s);
+                }
+                Some(_) => {
+                    self.advance();
+                }
+                None => {
+                    return Err(JsonError::UnexpectedEndOfInput {
+                        expected: "Closing quote".to_string(),
+                        position: self.current,
+                    });
+                }
+            }
+        }
+    }
+
+    fn consume_string_slow(&mut self, s: &mut String) -> JsonResult<String> {
+        while let Some(&b) = self.peek() {
+            match b {
+                b'"' => {
+                    self.advance();
+                    return Ok(std::mem::take(s));
+                }
+                b'\\' => {
                     self.advance(); // consume escape character
                     let special_meaning =
-                        self.advance().ok_or(JsonError::UnexpectedEndOfInput {
-                            expected: "Special meaning char for escape sequence".to_string(),
-                            position: self.current,
-                        })?;
-                    // Process unicode chars
-                    if special_meaning == 'u' {
-                        let mut consumed_unicode: String = String::new();
-                        for _ in 0..4 {
-                            let uni_char = self.advance().ok_or(JsonError::InvalidUnicode {
-                                sequence: format!("\\u{}", consumed_unicode),
+                        self.advance()
+                            .copied()
+                            .ok_or(JsonError::UnexpectedEndOfInput {
+                                expected: "Special meaning char for escape sequence".to_string(),
                                 position: self.current,
                             })?;
-                            consumed_unicode.push(uni_char);
+
+                    if special_meaning == b'u' {
+                        let hex_start = self.current;
+                        if self.current + 4 > self.input.len() {
+                            return Err(JsonError::InvalidUnicode {
+                                sequence: format!("\\u{}", &self.input[hex_start..]),
+                                position: self.current,
+                            });
                         }
-                        let unicode_sequence = parse_unicode_hex(&consumed_unicode).ok_or(
-                            JsonError::InvalidUnicode {
-                                sequence: format!("\\u{}", consumed_unicode),
-                                position: self.current,
-                            },
-                        )?;
-                        consumed_string.push(unicode_sequence);
+                        let hex_str = &self.input[hex_start..hex_start + 4];
+                        let ch = parse_unicode_hex(hex_str).ok_or(JsonError::InvalidUnicode {
+                            sequence: format!("\\u{}", hex_str),
+                            position: self.current,
+                        })?;
+                        s.push(ch);
+                        self.current += 4;
                     } else {
-                        let escape_sequence = resolve_escape_sequence(special_meaning).ok_or(
+                        let ch = resolve_escape_sequence(special_meaning as char).ok_or(
                             JsonError::InvalidEscape {
-                                char: special_meaning,
+                                char: special_meaning as char,
                                 position: self.current,
                             },
                         )?;
-                        consumed_string.push(escape_sequence);
+                        s.push(ch);
                     }
                 }
                 _ => {
-                    consumed_string.push(c);
+                    s.push(b as char);
                     self.advance();
                 }
             }
@@ -161,22 +226,22 @@ impl Tokenizer {
     }
 
     fn consume_keyword(&mut self) -> JsonResult<Token> {
-        let mut consumed_keyword: String = String::new();
+        let start = self.current;
 
         while let Some(c) = self.peek() {
-            if !c.is_alphabetic() {
+            if !c.is_ascii_alphabetic() {
                 break;
             }
-            consumed_keyword.push(c);
             self.advance();
         }
 
-        match consumed_keyword.as_str() {
+        let slice = &self.input[start..self.current];
+        match slice {
             "true" => Ok(Token::Boolean(true)),
             "false" => Ok(Token::Boolean(false)),
             "null" => Ok(Token::Null),
             _ => {
-                let found = match consumed_keyword.chars().next() {
+                let found = match slice.chars().next() {
                     Some(first) => first.to_string(),
                     None => "unknown".to_string(),
                 };
@@ -185,48 +250,74 @@ impl Tokenizer {
         }
     }
 
+    /// Consumes the input and returns the complete list of tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::{Tokenizer, Token};
+    ///
+    /// let mut tokenizer = Tokenizer::new("[1, true]");
+    /// let tokens = tokenizer.tokenize()?;
+    /// assert_eq!(tokens, vec![
+    ///     Token::LeftBracket,
+    ///     Token::Number(1.0),
+    ///     Token::Comma,
+    ///     Token::Boolean(true),
+    ///     Token::RightBracket,
+    /// ]);
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JsonError::UnexpectedToken`] if an invalid character is encountered,
+    /// [`JsonError::InvalidNumber`] if a numeric literal cannot be parsed,
+    /// [`JsonError::InvalidEscape`] if a string contains an unrecognized escape sequence,
+    /// [`JsonError::InvalidUnicode`] if a `\uXXXX` sequence is malformed, or
+    /// [`JsonError::UnexpectedEndOfInput`] if a string is unterminated.
     pub fn tokenize(&mut self) -> JsonResult<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
 
         while let Some(c) = self.peek() {
             match c {
-                ' ' | '\n' | '\t' | '\r' => {
+                b' ' | b'\n' | b'\t' | b'\r' => {
                     self.advance(); // explicitly skip whitespace
                 }
-                '"' => {
+                b'"' => {
                     self.advance(); // consume opening quote
                     let consumed_string = self.consume_string()?;
                     tokens.push(Token::String(consumed_string));
                 }
-                '0'..='9' | '-' => {
+                b'0'..=b'9' | b'-' => {
                     let consumed_number = self.consume_number()?;
                     tokens.push(Token::Number(consumed_number));
                 }
-                '{' => {
+                b'{' => {
                     self.advance();
                     tokens.push(Token::LeftBrace);
                 }
-                '}' => {
+                b'}' => {
                     self.advance();
                     tokens.push(Token::RightBrace);
                 }
-                '[' => {
+                b'[' => {
                     self.advance();
                     tokens.push(Token::LeftBracket);
                 }
-                ']' => {
+                b']' => {
                     self.advance();
                     tokens.push(Token::RightBracket);
                 }
-                ',' => {
+                b',' => {
                     self.advance();
                     tokens.push(Token::Comma);
                 }
-                ':' => {
+                b':' => {
                     self.advance();
                     tokens.push(Token::Colon);
                 }
-                _ if c.is_alphabetic() => {
+                _ if c.is_ascii_alphabetic() => {
                     let keyword_token = self.consume_keyword()?;
                     tokens.push(keyword_token);
                 }
@@ -234,7 +325,7 @@ impl Tokenizer {
                     if c.is_ascii_punctuation() {
                         return Err(unexpected_token_error(
                             "Valid JSON value",
-                            &c.to_string(),
+                            &(*c as char).to_string(),
                             0,
                         ));
                     }
