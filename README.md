@@ -49,8 +49,14 @@ maturin develop --release
 maturin build --release
 ```
 
-Once built, the tool can be run as a module like:
+Once built, the parser tool can be run as a module like:
 
 ```bash
 python3 -m rust_json_parser path-to-json/file.json
+```
+
+And a benchmark function is also exposed in the Python CLI as a flag:
+
+```bash
+python -m rust_json_parser --benchmark <path-to-dir-with-json-files>
 ```
