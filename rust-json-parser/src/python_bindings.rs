@@ -235,15 +235,16 @@ fn benchmark_performance<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let n = rounds as usize;
 
-    // --- Rust (parse + PyO3 conversion) ---
+    // --- simplejson ---
+    let simplejson_loads = py.import("simplejson")?.getattr("loads")?;
     for _ in 0..warmup {
-        let _ = parse_json(py, input)?;
+        let _ = simplejson_loads.call1((input,))?;
     }
-    let mut rust_times = Vec::with_capacity(n);
+    let mut simplejson_times = Vec::with_capacity(n);
     for _ in 0..rounds {
         let start = Instant::now();
-        let _ = parse_json(py, input)?;
-        rust_times.push(start.elapsed().as_secs_f64());
+        let _ = simplejson_loads.call1((input,))?;
+        simplejson_times.push(start.elapsed().as_secs_f64());
     }
 
     // --- json (stdlib C implementation) ---
@@ -258,16 +259,15 @@ fn benchmark_performance<'py>(
         json_times.push(start.elapsed().as_secs_f64());
     }
 
-    // --- simplejson ---
-    let simplejson_loads = py.import("simplejson")?.getattr("loads")?;
+    // --- Rust ---
     for _ in 0..warmup {
-        let _ = simplejson_loads.call1((input,))?;
+        let _ = parse_json(py, input)?;
     }
-    let mut simplejson_times = Vec::with_capacity(n);
+    let mut rust_times = Vec::with_capacity(n);
     for _ in 0..rounds {
         let start = Instant::now();
-        let _ = simplejson_loads.call1((input,))?;
-        simplejson_times.push(start.elapsed().as_secs_f64());
+        let _ = parse_json(py, input)?;
+        rust_times.push(start.elapsed().as_secs_f64());
     }
 
     let result = PyDict::new(py);

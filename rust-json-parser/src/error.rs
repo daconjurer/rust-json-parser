@@ -11,29 +11,15 @@ pub enum JsonError {
         position: usize,
     },
     /// The input ended before the parser found a required token.
-    UnexpectedEndOfInput {
-        expected: String,
-        position: usize,
-    },
+    UnexpectedEndOfInput { expected: String, position: usize },
     /// A numeric literal could not be parsed as a valid number.
-    InvalidNumber {
-        value: String,
-        position: usize,
-    },
+    InvalidNumber { value: String, position: usize },
     /// An unrecognized escape sequence was encountered inside a string.
-    InvalidEscape {
-        char: char,
-        position: usize,
-    },
+    InvalidEscape { char: char, position: usize },
     /// A `\uXXXX` escape sequence contains an invalid or incomplete hex value.
-    InvalidUnicode {
-        sequence: String,
-        position: usize,
-    },
+    InvalidUnicode { sequence: String, position: usize },
     /// A file system operation failed (e.g. file not found, permission denied).
-    Io {
-        message: String,
-    },
+    Io { message: String },
 }
 
 impl fmt::Display for JsonError {

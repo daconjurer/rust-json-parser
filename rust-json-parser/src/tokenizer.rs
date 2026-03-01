@@ -94,17 +94,21 @@ impl<'input> Tokenizer<'input> {
     /*
      * Look at current byte
      */
-    fn peek(&self) -> Option<char> {
-        self.input.as_bytes().get(self.current).map(|&b| b as char)
+    fn peek(&self) -> Option<&u8> {
+        self.input.as_bytes().get(self.current)
     }
 
     /*
-     * Move forward, return previous char
+     * Move forward, return previous byte
      */
-    fn advance(&mut self) -> Option<char> {
-        let b = self.input.as_bytes().get(self.current).copied()?;
+    fn advance(&mut self) -> Option<&u8> {
+        let b = self.input.as_bytes().get(self.current)?;
         self.current += 1;
-        Some(b as char)
+        Some(b)
+    }
+
+    fn _input_slice_to_string(&self, start: usize, end: usize) -> String {
+        self.input[start..end].to_string()
     }
 
     /*
@@ -115,69 +119,101 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn consume_number(&mut self) -> JsonResult<f64> {
-        let mut number_as_string: String = String::new();
+        let start = self.current;
 
         while let Some(c) = self.peek() {
-            if !(c.is_numeric() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') {
+            if !(c.is_ascii_digit()
+                || *c == b'.'
+                || *c == b'-'
+                || *c == b'e'
+                || *c == b'E'
+                || *c == b'+')
+            {
                 break;
             }
-            number_as_string.push(c);
             self.advance();
         }
-        let number = number_as_string
-            .parse::<f64>()
-            .map_err(|_| JsonError::InvalidNumber {
-                value: number_as_string,
-                position: self.current,
-            })?;
+        let slice = &self.input[start..self.current];
+        let number = slice.parse::<f64>().map_err(|_| JsonError::InvalidNumber {
+            value: slice.to_string(),
+            position: self.current,
+        })?;
         Ok(number)
     }
 
     fn consume_string(&mut self) -> JsonResult<String> {
-        let mut consumed_string: String = String::new();
+        let start = self.current;
 
-        while let Some(c) = self.peek() {
-            match c {
-                '"' => {
-                    self.advance(); // consume closing quote
-                    return Ok(consumed_string);
+        // Fast path: scan for closing quote with no escape sequences
+        loop {
+            match self.peek() {
+                Some(b'"') => {
+                    let s = self._input_slice_to_string(start, self.current);
+                    self.advance(); // Consume closing quote
+                    return Ok(s);
                 }
-                '\\' => {
+                Some(b'\\') => {
+                    // Copy what we've scanned so far and switch to slow path
+                    let mut s: String = self._input_slice_to_string(start, self.current);
+                    return self.consume_string_slow(&mut s);
+                }
+                Some(_) => {
+                    self.advance();
+                }
+                None => {
+                    return Err(JsonError::UnexpectedEndOfInput {
+                        expected: "Closing quote".to_string(),
+                        position: self.current,
+                    });
+                }
+            }
+        }
+    }
+
+    fn consume_string_slow(&mut self, s: &mut String) -> JsonResult<String> {
+        while let Some(&b) = self.peek() {
+            match b {
+                b'"' => {
+                    self.advance();
+                    return Ok(std::mem::take(s));
+                }
+                b'\\' => {
                     self.advance(); // consume escape character
                     let special_meaning =
-                        self.advance().ok_or(JsonError::UnexpectedEndOfInput {
-                            expected: "Special meaning char for escape sequence".to_string(),
-                            position: self.current,
-                        })?;
-                    // Process unicode chars
-                    if special_meaning == 'u' {
-                        let mut consumed_unicode: String = String::new();
-                        for _ in 0..4 {
-                            let uni_char = self.advance().ok_or(JsonError::InvalidUnicode {
-                                sequence: format!("\\u{}", consumed_unicode),
+                        self.advance()
+                            .copied()
+                            .ok_or(JsonError::UnexpectedEndOfInput {
+                                expected: "Special meaning char for escape sequence".to_string(),
                                 position: self.current,
                             })?;
-                            consumed_unicode.push(uni_char);
+
+                    if special_meaning == b'u' {
+                        let hex_start = self.current;
+                        if self.current + 4 > self.input.len() {
+                            return Err(JsonError::InvalidUnicode {
+                                sequence: format!("\\u{}", &self.input[hex_start..]),
+                                position: self.current,
+                            });
                         }
-                        let unicode_sequence = parse_unicode_hex(&consumed_unicode).ok_or(
-                            JsonError::InvalidUnicode {
-                                sequence: format!("\\u{}", consumed_unicode),
-                                position: self.current,
-                            },
-                        )?;
-                        consumed_string.push(unicode_sequence);
+                        let hex_str = &self.input[hex_start..hex_start + 4];
+                        let ch = parse_unicode_hex(hex_str).ok_or(JsonError::InvalidUnicode {
+                            sequence: format!("\\u{}", hex_str),
+                            position: self.current,
+                        })?;
+                        s.push(ch);
+                        self.current += 4;
                     } else {
-                        let escape_sequence = resolve_escape_sequence(special_meaning).ok_or(
+                        let ch = resolve_escape_sequence(special_meaning as char).ok_or(
                             JsonError::InvalidEscape {
-                                char: special_meaning,
+                                char: special_meaning as char,
                                 position: self.current,
                             },
                         )?;
-                        consumed_string.push(escape_sequence);
+                        s.push(ch);
                     }
                 }
                 _ => {
-                    consumed_string.push(c);
+                    s.push(b as char);
                     self.advance();
                 }
             }
@@ -190,22 +226,22 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn consume_keyword(&mut self) -> JsonResult<Token> {
-        let mut consumed_keyword: String = String::new();
+        let start = self.current;
 
         while let Some(c) = self.peek() {
-            if !c.is_alphabetic() {
+            if !c.is_ascii_alphabetic() {
                 break;
             }
-            consumed_keyword.push(c);
             self.advance();
         }
 
-        match consumed_keyword.as_str() {
+        let slice = &self.input[start..self.current];
+        match slice {
             "true" => Ok(Token::Boolean(true)),
             "false" => Ok(Token::Boolean(false)),
             "null" => Ok(Token::Null),
             _ => {
-                let found = match consumed_keyword.chars().next() {
+                let found = match slice.chars().next() {
                     Some(first) => first.to_string(),
                     None => "unknown".to_string(),
                 };
@@ -245,43 +281,43 @@ impl<'input> Tokenizer<'input> {
 
         while let Some(c) = self.peek() {
             match c {
-                ' ' | '\n' | '\t' | '\r' => {
+                b' ' | b'\n' | b'\t' | b'\r' => {
                     self.advance(); // explicitly skip whitespace
                 }
-                '"' => {
+                b'"' => {
                     self.advance(); // consume opening quote
                     let consumed_string = self.consume_string()?;
                     tokens.push(Token::String(consumed_string));
                 }
-                '0'..='9' | '-' => {
+                b'0'..=b'9' | b'-' => {
                     let consumed_number = self.consume_number()?;
                     tokens.push(Token::Number(consumed_number));
                 }
-                '{' => {
+                b'{' => {
                     self.advance();
                     tokens.push(Token::LeftBrace);
                 }
-                '}' => {
+                b'}' => {
                     self.advance();
                     tokens.push(Token::RightBrace);
                 }
-                '[' => {
+                b'[' => {
                     self.advance();
                     tokens.push(Token::LeftBracket);
                 }
-                ']' => {
+                b']' => {
                     self.advance();
                     tokens.push(Token::RightBracket);
                 }
-                ',' => {
+                b',' => {
                     self.advance();
                     tokens.push(Token::Comma);
                 }
-                ':' => {
+                b':' => {
                     self.advance();
                     tokens.push(Token::Colon);
                 }
-                _ if c.is_alphabetic() => {
+                _ if c.is_ascii_alphabetic() => {
                     let keyword_token = self.consume_keyword()?;
                     tokens.push(keyword_token);
                 }
@@ -289,7 +325,7 @@ impl<'input> Tokenizer<'input> {
                     if c.is_ascii_punctuation() {
                         return Err(unexpected_token_error(
                             "Valid JSON value",
-                            &c.to_string(),
+                            &(*c as char).to_string(),
                             0,
                         ));
                     }
