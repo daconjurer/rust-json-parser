@@ -11,11 +11,15 @@ use std::fs;
 */
 fn err_on_missing_expected_comma(
     expected_comma: bool,
-    found: &str,
+    found: &Token,
     position: usize,
 ) -> JsonResult<()> {
     if expected_comma {
-        return Err(unexpected_token_error(",", found, position));
+        return Err(unexpected_token_error(
+            ",",
+            &format!("{:?}", found),
+            position,
+        ));
     }
     Ok(())
 }
@@ -177,11 +181,7 @@ impl JsonParser {
             match token {
                 // Start of array
                 Token::LeftBracket => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     let nested_array = self.parse_array()?;
                     array.push(nested_array);
@@ -194,55 +194,35 @@ impl JsonParser {
                 }
                 // Start of object (opening { is consumed by parse_object())
                 Token::LeftBrace => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     let nested_object = self.parse_object()?;
                     array.push(nested_object);
                     expect_comma = true;
                 }
                 Token::String(s) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::String(s.clone()));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Number(n) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Number(*n));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Boolean(b) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Boolean(*b));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Null => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Null);
                     self.advance();
@@ -295,11 +275,7 @@ impl JsonParser {
             match token {
                 // Start of object
                 Token::LeftBrace => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     if colon_found {
                         let nested_object = self.parse_object()?;
@@ -315,11 +291,7 @@ impl JsonParser {
                 }
                 // Start of array (end of array is handled in parse_array())
                 Token::LeftBracket => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     if colon_found {
                         let array = self.parse_array()?;
@@ -330,11 +302,7 @@ impl JsonParser {
                 }
                 // Key or string value
                 Token::String(s) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     // Unexpected end of input
                     let next_token =
@@ -359,11 +327,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Number(n) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(
                         colon_found,
                         &n.to_string(),
@@ -377,11 +341,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Boolean(b) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(
                         colon_found,
                         &b.to_string(),
@@ -395,11 +355,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Null => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(colon_found, "null", self.current)?;
 
                     object.insert(key.clone(), JsonValue::Null);
@@ -462,8 +418,8 @@ impl JsonParser {
     /*
      * Move forward, return previous token
      */
-    fn advance(&mut self) -> Option<Token> {
-        let token = self.tokens.get(self.current).cloned();
+    fn advance(&mut self) -> Option<&Token> {
+        let token = self.tokens.get(self.current);
         self.current += 1;
         token
     }
