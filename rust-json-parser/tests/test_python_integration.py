@@ -1,9 +1,8 @@
 import pytest
-
 from rust_json_parser import (
+    dumps,
     parse_json,
     parse_json_file,
-    dumps,
 )
 
 
@@ -53,7 +52,7 @@ class TestErrorHandling:
 
     def test_file_not_found_raises_io_error(self):
         with pytest.raises(IOError):
-            parse_json_file('/nonexistent/file.json')
+            parse_json_file("/nonexistent/file.json")
 
     def test_error_includes_position(self):
         try:
@@ -70,18 +69,16 @@ class TestSerialization:
 
     def test_dumps_with_indent(self):
         result = dumps({"key": "value"}, indent=2)
-        assert "{\n  \"key\": \"value\"\n}" == result
+        assert '{\n  "key": "value"\n}' == result
 
 
 class TestBenchmark:
-    def test_benchmark_returns_tuple(self):
-        """Verify benchmark_performance returns timing tuple with all three values."""
+    def test_benchmark_returns_dict(self):
+        """Verify benchmark_performance returns timing dict with all four values."""
         from rust_json_parser import benchmark_performance
 
-        rust_time, python_json_time, simplejson_time = benchmark_performance('{"test": 1}')
-        assert isinstance(rust_time, float)
-        assert isinstance(python_json_time, float)
-        assert isinstance(simplejson_time, float)
-        assert rust_time > 0
-        assert python_json_time > 0
-        assert simplejson_time > 0
+        result = benchmark_performance('{"test": 1}')
+        for key in ("pure-rust", "rust", "json", "simplejson"):
+            assert key in result, f"missing key: {key}"
+            assert isinstance(result[key], float), f"{key} is not float"
+            assert result[key] > 0, f"{key} is not positive"

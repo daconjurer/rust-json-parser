@@ -85,10 +85,7 @@ impl<'input> Tokenizer<'input> {
     /// let tokenizer = Tokenizer::new(r#"{"key": 42}"#);
     /// ```
     pub fn new(input: &'input str) -> Self {
-        Self {
-            current: 0,
-            input: input,
-        }
+        Self { current: 0, input }
     }
 
     /*
@@ -105,10 +102,6 @@ impl<'input> Tokenizer<'input> {
         let b = self.input.as_bytes().get(self.current)?;
         self.current += 1;
         Some(b)
-    }
-
-    fn _input_slice_to_string(&self, start: usize, end: usize) -> String {
-        self.input[start..end].to_string()
     }
 
     /*
@@ -142,20 +135,27 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn consume_string(&mut self) -> JsonResult<String> {
-        let start = self.current;
+        let mut start = self.current;
+        let mut buffer: Option<String> = None;
 
-        // Fast path: scan for closing quote with no escape sequences
         loop {
             match self.peek() {
-                Some(b'"') => {
-                    let s = self._input_slice_to_string(start, self.current);
-                    self.advance(); // Consume closing quote
-                    return Ok(s);
+                Some(&b'"') => {
+                    let tail = &self.input[start..self.current];
+                    self.advance();
+                    return Ok(match buffer {
+                        None => tail.to_string(),
+                        Some(mut s) => {
+                            s.push_str(tail);
+                            s
+                        }
+                    });
                 }
-                Some(b'\\') => {
-                    // Copy what we've scanned so far and switch to slow path
-                    let mut s: String = self._input_slice_to_string(start, self.current);
-                    return self.consume_string_slow(&mut s);
+                Some(&b'\\') => {
+                    let s = buffer.get_or_insert_with(String::new);
+                    s.push_str(&self.input[start..self.current]);
+                    self.consume_escape(s)?;
+                    start = self.current;
                 }
                 Some(_) => {
                     self.advance();
@@ -170,59 +170,39 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn consume_string_slow(&mut self, s: &mut String) -> JsonResult<String> {
-        while let Some(&b) = self.peek() {
-            match b {
-                b'"' => {
-                    self.advance();
-                    return Ok(std::mem::take(s));
-                }
-                b'\\' => {
-                    self.advance(); // consume escape character
-                    let special_meaning =
-                        self.advance()
-                            .copied()
-                            .ok_or(JsonError::UnexpectedEndOfInput {
-                                expected: "Special meaning char for escape sequence".to_string(),
-                                position: self.current,
-                            })?;
-
-                    if special_meaning == b'u' {
-                        let hex_start = self.current;
-                        if self.current + 4 > self.input.len() {
-                            return Err(JsonError::InvalidUnicode {
-                                sequence: format!("\\u{}", &self.input[hex_start..]),
-                                position: self.current,
-                            });
-                        }
-                        let hex_str = &self.input[hex_start..hex_start + 4];
-                        let ch = parse_unicode_hex(hex_str).ok_or(JsonError::InvalidUnicode {
-                            sequence: format!("\\u{}", hex_str),
-                            position: self.current,
-                        })?;
-                        s.push(ch);
-                        self.current += 4;
-                    } else {
-                        let ch = resolve_escape_sequence(special_meaning as char).ok_or(
-                            JsonError::InvalidEscape {
-                                char: special_meaning as char,
-                                position: self.current,
-                            },
-                        )?;
-                        s.push(ch);
-                    }
-                }
-                _ => {
-                    s.push(b as char);
-                    self.advance();
-                }
+    fn consume_escape(&mut self, s: &mut String) -> JsonResult<()> {
+        self.advance();
+        let special = self
+            .peek()
+            .copied()
+            .ok_or(JsonError::UnexpectedEndOfInput {
+                expected: "Special meaning char for escape sequence".to_string(),
+                position: self.current,
+            })?;
+        self.advance();
+        if special == b'u' {
+            let hex_start = self.current;
+            if self.current + 4 > self.input.len() {
+                return Err(JsonError::InvalidUnicode {
+                    sequence: format!("\\u{}", &self.input[hex_start..]),
+                    position: self.current,
+                });
             }
+            let hex_str = &self.input[hex_start..hex_start + 4];
+            let ch = parse_unicode_hex(hex_str).ok_or(JsonError::InvalidUnicode {
+                sequence: format!("\\u{}", hex_str),
+                position: self.current,
+            })?;
+            s.push(ch);
+            self.current += 4;
+        } else {
+            let ch = resolve_escape_sequence(special as char).ok_or(JsonError::InvalidEscape {
+                char: special as char,
+                position: self.current,
+            })?;
+            s.push(ch);
         }
-        // Unterminated string
-        Err(JsonError::UnexpectedEndOfInput {
-            expected: "Closing quote".to_string(),
-            position: self.current,
-        })
+        Ok(())
     }
 
     fn consume_keyword(&mut self) -> JsonResult<Token> {

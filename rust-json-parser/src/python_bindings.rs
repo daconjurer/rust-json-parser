@@ -157,8 +157,7 @@ fn parse_json<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> 
 ///     [{'name': 'Alice'}, {'name': 'Bob'}]
 #[pyfunction]
 fn parse_json_file<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-    let result = parse_file(path)?;
-    result.into_pyobject(py)
+    parse_file(path)?.into_pyobject(py)
 }
 
 /// Serialize a Python object to a JSON string.
@@ -197,17 +196,66 @@ fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
 }
 
 fn median(times: &mut [f64]) -> f64 {
+    times.sort_by(|a, b| a.total_cmp(b));
     let mid = times.len() / 2;
-    times.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
     if times.len() % 2 == 1 {
         times[mid]
     } else {
-        let left = *times[..mid]
-            .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
-        (left + times[mid]) / 2.0
+        (times[mid - 1] + times[mid]) / 2.0
     }
+}
+
+/// Run `f` for `warmup` untimed iterations, then `rounds` timed iterations,
+/// and return the median per-iteration time in seconds.
+fn bench_median<F>(rounds: u32, warmup: u32, mut f: F) -> PyResult<f64>
+where
+    F: FnMut() -> PyResult<()>,
+{
+    for _ in 0..warmup {
+        f()?;
+    }
+    let mut times = Vec::with_capacity(rounds as usize);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        f()?;
+        times.push(start.elapsed().as_secs_f64());
+    }
+    Ok(median(&mut times))
+}
+
+fn bench_pure_rust(input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    bench_median(rounds, warmup, || {
+        let _ = parse(input)?;
+        Ok(())
+    })
+}
+
+fn bench_rust_with_bindings(
+    py: Python<'_>,
+    input: &str,
+    rounds: u32,
+    warmup: u32,
+) -> PyResult<f64> {
+    bench_median(rounds, warmup, || {
+        let _ = parse_json(py, input)?;
+        Ok(())
+    })
+}
+
+fn bench_python_json(py: Python<'_>, input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    let loads = py.import("json")?.getattr("loads")?;
+    bench_median(rounds, warmup, || {
+        let _ = loads.call1((input,))?;
+        Ok(())
+    })
+}
+
+fn bench_simplejson(py: Python<'_>, input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    let loads = py.import("simplejson")?.getattr("loads")?;
+    bench_median(rounds, warmup, || {
+        let _ = loads.call1((input,))?;
+        Ok(())
+    })
 }
 
 /// Benchmark parse_json against json.loads and simplejson.loads.
@@ -224,7 +272,7 @@ fn median(times: &mut [f64]) -> f64 {
 ///
 /// Returns:
 ///     A dict with median per-iteration times in seconds:
-///     ``{"rust": float, "json": float, "simplejson": float | None}``.
+///     ``{"pure-rust": float, "rust": float, "json": float, "simplejson": float}``.
 #[pyfunction]
 #[pyo3(signature = (input, rounds=1000, warmup=10))]
 fn benchmark_performance<'py>(
@@ -233,59 +281,11 @@ fn benchmark_performance<'py>(
     rounds: u32,
     warmup: u32,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let n = rounds as usize;
-
-    // --- Rust (with no bindings) ---
-    for _ in 0..warmup {
-        let _ = parse(input)?;
-    }
-    let mut pure_rust_times = Vec::with_capacity(n);
-    for _ in 0..rounds {
-        let start = Instant::now();
-        let _ = parse(input)?;
-        pure_rust_times.push(start.elapsed().as_secs_f64());
-    }
-
-    // --- simplejson ---
-    let simplejson_loads = py.import("simplejson")?.getattr("loads")?;
-    for _ in 0..warmup {
-        let _ = simplejson_loads.call1((input,))?;
-    }
-    let mut simplejson_times = Vec::with_capacity(n);
-    for _ in 0..rounds {
-        let start = Instant::now();
-        let _ = simplejson_loads.call1((input,))?;
-        simplejson_times.push(start.elapsed().as_secs_f64());
-    }
-
-    // --- json (stdlib C implementation) ---
-    let json_loads = py.import("json")?.getattr("loads")?;
-    for _ in 0..warmup {
-        let _ = json_loads.call1((input,))?;
-    }
-    let mut json_times = Vec::with_capacity(n);
-    for _ in 0..rounds {
-        let start = Instant::now();
-        let _ = json_loads.call1((input,))?;
-        json_times.push(start.elapsed().as_secs_f64());
-    }
-
-    // --- Rust ---
-    for _ in 0..warmup {
-        let _ = parse_json(py, input)?;
-    }
-    let mut rust_times = Vec::with_capacity(n);
-    for _ in 0..rounds {
-        let start = Instant::now();
-        let _ = parse_json(py, input)?;
-        rust_times.push(start.elapsed().as_secs_f64());
-    }
-
     let result = PyDict::new(py);
-    result.set_item("pure-rust", median(&mut pure_rust_times))?;
-    result.set_item("rust", median(&mut rust_times))?;
-    result.set_item("json", median(&mut json_times))?;
-    result.set_item("simplejson", median(&mut simplejson_times))?;
+    result.set_item("pure-rust", bench_pure_rust(input, rounds, warmup)?)?;
+    result.set_item("rust", bench_rust_with_bindings(py, input, rounds, warmup)?)?;
+    result.set_item("json", bench_python_json(py, input, rounds, warmup)?)?;
+    result.set_item("simplejson", bench_simplejson(py, input, rounds, warmup)?)?;
     Ok(result)
 }
 
