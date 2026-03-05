@@ -1,10 +1,11 @@
 use crate::parse_json as parse;
+use crate::parse_json_file as parse_file;
 use crate::{JsonError, JsonValue};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::collections::HashMap;
-use std::fs;
+use std::time::Instant;
 
 /// Utility function to convert a JsonValue instance (value) into a PyAny instance
 fn json_value_to_py<'py>(value: JsonValue, py: Python<'py>) -> Result<Bound<'py, PyAny>, PyErr> {
@@ -103,22 +104,88 @@ impl From<JsonError> for PyErr {
                 "Invalid unicode sequence at position {}: {}",
                 position, sequence
             )),
+            JsonError::Io { message } => PyIOError::new_err(message),
         }
     }
 }
 
+/// Parse a JSON string and return the corresponding Python object.
+///
+/// Args:
+///     input: A string containing valid JSON.
+///
+/// Returns:
+///     The parsed JSON as a Python object (dict, list, str, float, bool, or None).
+///
+/// Raises:
+///     ValueError: If the input is not valid JSON.
+///
+/// Examples:
+///     >>> parse_json('{"name": "Alice", "age": 30}')
+///     {'name': 'Alice', 'age': 30.0}
+///
+///     >>> parse_json('[1, 2, 3]')
+///     [1.0, 2.0, 3.0]
+///
+///     >>> parse_json('"hello"')
+///     'hello'
+///
+///     >>> parse_json('null')
 #[pyfunction]
 fn parse_json<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let result = parse(input)?;
     result.into_pyobject(py)
 }
 
+/// Parse a JSON file and return the corresponding Python object.
+///
+/// Args:
+///     path: Path to a file containing valid JSON.
+///
+/// Returns:
+///     The parsed JSON as a Python object (dict, list, str, float, bool, or None).
+///
+/// Raises:
+///     ValueError: If the file contents are not valid JSON.
+///     OSError: If the file cannot be read.
+///
+/// Examples:
+///     >>> parse_json_file("config.json")
+///     {'key': 'value'}
+///
+///     >>> parse_json_file("data/users.json")
+///     [{'name': 'Alice'}, {'name': 'Bob'}]
 #[pyfunction]
 fn parse_json_file<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-    let contents = fs::read_to_string(&path)?;
-    Ok(parse_json(py, &contents)?)
+    parse_file(path)?.into_pyobject(py)
 }
 
+/// Serialize a Python object to a JSON string.
+///
+/// Args:
+///     obj: A Python object to serialize (dict, list, str, float, int, bool, or None).
+///     indent: Optional number of spaces for pretty-printing. If None, output is compact.
+///
+/// Returns:
+///     A JSON string representation of the object.
+///
+/// Raises:
+///     TypeError: If the object contains types that cannot be serialized to JSON.
+///
+/// Examples:
+///     >>> dumps({"name": "Alice", "age": 30})
+///     '{"name": "Alice", "age": 30}'
+///
+///     >>> dumps([1, 2, 3])
+///     '[1, 2, 3]'
+///
+///     >>> print(dumps({"key": "value"}, indent=2))
+///     {
+///       "key": "value"
+///     }
+///
+///     >>> dumps(None)
+///     'null'
 #[pyfunction]
 #[pyo3(signature = (obj, indent=None))]
 fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
@@ -128,10 +195,105 @@ fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
     }
 }
 
+fn median(times: &mut [f64]) -> f64 {
+    times.sort_by(|a, b| a.total_cmp(b));
+    let mid = times.len() / 2;
+    if times.len() % 2 == 1 {
+        times[mid]
+    } else {
+        (times[mid - 1] + times[mid]) / 2.0
+    }
+}
+
+/// Run `f` for `warmup` untimed iterations, then `rounds` timed iterations,
+/// and return the median per-iteration time in seconds.
+fn bench_median<F>(rounds: u32, warmup: u32, mut f: F) -> PyResult<f64>
+where
+    F: FnMut() -> PyResult<()>,
+{
+    for _ in 0..warmup {
+        f()?;
+    }
+    let mut times = Vec::with_capacity(rounds as usize);
+    for _ in 0..rounds {
+        let start = Instant::now();
+        f()?;
+        times.push(start.elapsed().as_secs_f64());
+    }
+    Ok(median(&mut times))
+}
+
+fn bench_pure_rust(input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    bench_median(rounds, warmup, || {
+        let _ = parse(input)?;
+        Ok(())
+    })
+}
+
+fn bench_rust_with_bindings(
+    py: Python<'_>,
+    input: &str,
+    rounds: u32,
+    warmup: u32,
+) -> PyResult<f64> {
+    bench_median(rounds, warmup, || {
+        let _ = parse_json(py, input)?;
+        Ok(())
+    })
+}
+
+fn bench_python_json(py: Python<'_>, input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    let loads = py.import("json")?.getattr("loads")?;
+    bench_median(rounds, warmup, || {
+        let _ = loads.call1((input,))?;
+        Ok(())
+    })
+}
+
+fn bench_simplejson(py: Python<'_>, input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
+    let loads = py.import("simplejson")?.getattr("loads")?;
+    bench_median(rounds, warmup, || {
+        let _ = loads.call1((input,))?;
+        Ok(())
+    })
+}
+
+/// Benchmark parse_json against json.loads and simplejson.loads.
+///
+/// All three parsers are measured doing identical work: taking a JSON string
+/// and returning Python objects. Each gets the same number of warmup and
+/// timed rounds to ensure a fair comparison. Reports the **median**
+/// per-iteration time to reduce the impact of GC pauses and other outliers.
+///
+/// Args:
+///     input: A JSON string to parse.
+///     rounds: Number of timed iterations per parser (default: 1000).
+///     warmup: Number of untimed warmup iterations per parser (default: 10).
+///
+/// Returns:
+///     A dict with median per-iteration times in seconds:
+///     ``{"pure-rust": float, "rust": float, "json": float, "simplejson": float}``.
+#[pyfunction]
+#[pyo3(signature = (input, rounds=1000, warmup=10))]
+fn benchmark_performance<'py>(
+    py: Python<'py>,
+    input: &str,
+    rounds: u32,
+    warmup: u32,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("pure-rust", bench_pure_rust(input, rounds, warmup)?)?;
+    result.set_item("rust", bench_rust_with_bindings(py, input, rounds, warmup)?)?;
+    result.set_item("json", bench_python_json(py, input, rounds, warmup)?)?;
+    result.set_item("simplejson", bench_simplejson(py, input, rounds, warmup)?)?;
+    Ok(result)
+}
+
 #[pymodule]
 fn _rust_json_parser(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json_file, m)?)?;
     m.add_function(wrap_pyfunction!(dumps, m)?)?;
+    m.add_function(wrap_pyfunction!(benchmark_performance, m)?)?;
     Ok(())
 }

@@ -4,3 +4,4 @@ packaging==26.0
 pluggy==1.6.0
 pygments==2.19.2
 pytest==9.0.2
+simplejson==3.20.2

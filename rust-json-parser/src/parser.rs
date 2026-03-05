@@ -4,17 +4,22 @@ use crate::JsonResult;
 use crate::error::{unexpected_end_of_input, unexpected_token_error};
 use crate::tokenizer::{Token, Tokenizer};
 use crate::value::JsonValue;
+use std::fs;
 
 /*
  * Utility function to error upon missing expected comma
 */
 fn err_on_missing_expected_comma(
     expected_comma: bool,
-    found: &str,
+    found: &Token,
     position: usize,
 ) -> JsonResult<()> {
     if expected_comma {
-        return Err(unexpected_token_error(",", found, position));
+        return Err(unexpected_token_error(
+            ",",
+            &format!("{:?}", found),
+            position,
+        ));
     }
     Ok(())
 }
@@ -86,18 +91,54 @@ fn err_on_unexpected_closing_token(
     Ok(())
 }
 
+/// A recursive descent parser that converts a token stream into a [`JsonValue`] tree.
 pub struct JsonParser {
     tokens: Vec<Token>,
     current: usize,
 }
 
 impl JsonParser {
+    /// Tokenizes the input string and creates a new `JsonParser` ready to parse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::JsonParser;
+    ///
+    /// let parser = JsonParser::new(r#"{"key": "value"}"#)?;
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`JsonError`](crate::JsonError) if the input contains invalid tokens
+    /// (see [`Tokenizer::tokenize`](crate::Tokenizer::tokenize)).
     pub fn new(input: &str) -> JsonResult<Self> {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize()?;
         Ok(Self { current: 0, tokens })
     }
 
+    /// Parses the token stream and returns the root [`JsonValue`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::{JsonParser, JsonValue};
+    ///
+    /// let mut parser = JsonParser::new("[1, 2, 3]")?;
+    /// let value = parser.parse()?;
+    /// assert_eq!(value.as_array().map(|a| a.len()), Some(3));
+    /// # Ok::<(), rust_json_parser::JsonError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JsonError::UnexpectedToken`](crate::JsonError::UnexpectedToken) if the
+    /// token stream contains structurally invalid JSON (e.g. missing commas, colons, or
+    /// mismatched brackets), or
+    /// [`JsonError::UnexpectedEndOfInput`](crate::JsonError::UnexpectedEndOfInput) if the
+    /// input ends before a complete value is formed.
     pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
             Some(Token::LeftBrace) => self.parse_object(),
@@ -140,11 +181,7 @@ impl JsonParser {
             match token {
                 // Start of array
                 Token::LeftBracket => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     let nested_array = self.parse_array()?;
                     array.push(nested_array);
@@ -157,55 +194,35 @@ impl JsonParser {
                 }
                 // Start of object (opening { is consumed by parse_object())
                 Token::LeftBrace => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     let nested_object = self.parse_object()?;
                     array.push(nested_object);
                     expect_comma = true;
                 }
                 Token::String(s) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::String(s.clone()));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Number(n) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Number(*n));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Boolean(b) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Boolean(*b));
                     self.advance();
                     expect_comma = true;
                 }
                 Token::Null => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     array.push(JsonValue::Null);
                     self.advance();
@@ -258,11 +275,7 @@ impl JsonParser {
             match token {
                 // Start of object
                 Token::LeftBrace => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     if colon_found {
                         let nested_object = self.parse_object()?;
@@ -278,11 +291,7 @@ impl JsonParser {
                 }
                 // Start of array (end of array is handled in parse_array())
                 Token::LeftBracket => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     if colon_found {
                         let array = self.parse_array()?;
@@ -293,11 +302,7 @@ impl JsonParser {
                 }
                 // Key or string value
                 Token::String(s) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
 
                     // Unexpected end of input
                     let next_token =
@@ -322,11 +327,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Number(n) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(
                         colon_found,
                         &n.to_string(),
@@ -340,11 +341,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Boolean(b) => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(
                         colon_found,
                         &b.to_string(),
@@ -358,11 +355,7 @@ impl JsonParser {
                     self.advance();
                 }
                 Token::Null => {
-                    err_on_missing_expected_comma(
-                        expect_comma,
-                        &format!("{:?}", token),
-                        self.current,
-                    )?;
+                    err_on_missing_expected_comma(expect_comma, token, self.current)?;
                     err_on_unexpected_value_before_colon(colon_found, "null", self.current)?;
 
                     object.insert(key.clone(), JsonValue::Null);
@@ -425,8 +418,8 @@ impl JsonParser {
     /*
      * Move forward, return previous token
      */
-    fn advance(&mut self) -> Option<Token> {
-        let token = self.tokens.get(self.current).cloned();
+    fn advance(&mut self) -> Option<&Token> {
+        let token = self.tokens.get(self.current);
         self.current += 1;
         token
     }
@@ -439,8 +432,52 @@ impl JsonParser {
     }
 }
 
+/// Parses a JSON string and returns the corresponding [`JsonValue`].
+///
+/// This is the main entry point for parsing JSON. It tokenizes and parses in one step.
+///
+/// # Examples
+///
+/// ```
+/// use rust_json_parser::{parse_json, JsonValue};
+///
+/// let value = parse_json(r#"{"name": "Alice"}"#)?;
+/// assert_eq!(value.get("name"), Some(&JsonValue::String("Alice".to_string())));
+///
+/// let value = parse_json("[1, 2, 3]")?;
+/// assert_eq!(value.as_array().map(|a| a.len()), Some(3));
+/// # Ok::<(), rust_json_parser::JsonError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns a [`JsonError`](crate::JsonError) if the input is not valid JSON. This includes
+/// tokenization errors (invalid characters, malformed strings or numbers) and structural
+/// errors (missing commas, unclosed brackets, etc.).
 pub fn parse_json(input: &str) -> JsonResult<JsonValue> {
     JsonParser::new(input)?.parse()
+}
+
+/// Reads a file at the given path and parses its contents as JSON.
+///
+/// # Examples
+///
+/// ```no_run
+/// use rust_json_parser::parse_json_file;
+///
+/// let value = parse_json_file("data.json")?;
+/// println!("{}", value);
+/// # Ok::<(), rust_json_parser::JsonError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns [`JsonError::Io`](crate::JsonError::Io) if the file cannot be read (e.g. not
+/// found or permission denied), or any other [`JsonError`](crate::JsonError) variant if the
+/// file contents are not valid JSON.
+pub fn parse_json_file(path: &str) -> JsonResult<JsonValue> {
+    let contents = fs::read_to_string(path)?;
+    parse_json(&contents)
 }
 
 #[cfg(test)]

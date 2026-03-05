@@ -1,38 +1,25 @@
 use std::error::Error;
 use std::fmt;
 
-/*
- * Enum for JsonError kind, for unsuccessful JSON processing.
- * Valid variants:
- * UnexpectedToken
- * UnexpectedEndOfInput
- * InvalidNumber
- * InvalidEscape
- * InvalidUnicode
- */
+/// Error type representing all possible failures during JSON parsing and serialization.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonError {
+    /// A token was found that does not match what the parser expected at this position.
     UnexpectedToken {
         expected: String,
         found: String,
         position: usize,
     },
-    UnexpectedEndOfInput {
-        expected: String,
-        position: usize,
-    },
-    InvalidNumber {
-        value: String,
-        position: usize,
-    },
-    InvalidEscape {
-        char: char,
-        position: usize,
-    },
-    InvalidUnicode {
-        sequence: String,
-        position: usize,
-    },
+    /// The input ended before the parser found a required token.
+    UnexpectedEndOfInput { expected: String, position: usize },
+    /// A numeric literal could not be parsed as a valid number.
+    InvalidNumber { value: String, position: usize },
+    /// An unrecognized escape sequence was encountered inside a string.
+    InvalidEscape { char: char, position: usize },
+    /// A `\uXXXX` escape sequence contains an invalid or incomplete hex value.
+    InvalidUnicode { sequence: String, position: usize },
+    /// A file system operation failed (e.g. file not found, permission denied).
+    Io { message: String },
 }
 
 impl fmt::Display for JsonError {
@@ -73,12 +60,31 @@ impl fmt::Display for JsonError {
                     position, sequence,
                 )
             }
+            JsonError::Io { message } => write!(f, "IO error: {}", message),
         }
     }
 }
 
 impl Error for JsonError {}
 
+impl From<std::io::Error> for JsonError {
+    fn from(err: std::io::Error) -> Self {
+        JsonError::Io {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Creates an [`JsonError::UnexpectedToken`] error with the given context.
+///
+/// # Examples
+///
+/// ```
+/// use rust_json_parser::error::unexpected_token_error;
+///
+/// let err = unexpected_token_error("number", "@", 5);
+/// assert_eq!(err.to_string(), "Unexpected token at position 5: expected number, found @");
+/// ```
 pub fn unexpected_token_error(expected: &str, found: &str, position: usize) -> JsonError {
     JsonError::UnexpectedToken {
         expected: expected.to_string(),
@@ -87,6 +93,16 @@ pub fn unexpected_token_error(expected: &str, found: &str, position: usize) -> J
     }
 }
 
+/// Creates an [`JsonError::UnexpectedEndOfInput`] error with the given context.
+///
+/// # Examples
+///
+/// ```
+/// use rust_json_parser::error::unexpected_end_of_input;
+///
+/// let err = unexpected_end_of_input("closing quote", 10);
+/// assert_eq!(err.to_string(), "Unexpected end of input at position 10: expected closing quote");
+/// ```
 pub fn unexpected_end_of_input(expected: &str, position: usize) -> JsonError {
     JsonError::UnexpectedEndOfInput {
         expected: expected.to_string(),
