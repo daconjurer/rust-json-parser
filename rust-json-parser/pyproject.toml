@@ -11,3 +11,7 @@ requires-python = ">=3.12"
 python-source = "python"
 module-name = "rust_json_parser._rust_json_parser"
 features = ["python", "pyo3/extension-module"]
+include = [
+    "python/rust_json_parser/*.pyi",
+    "python/rust_json_parser/py.typed",
+]
