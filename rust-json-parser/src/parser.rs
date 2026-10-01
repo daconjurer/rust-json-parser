@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::JsonResult;
 use crate::error::{unexpected_end_of_input, unexpected_token_error};
 use crate::tokenizer::{Token, Tokenizer};
 use crate::value::JsonValue;
+use crate::{JsonError, JsonResult};
 use std::fs;
 
 /*
@@ -111,8 +111,8 @@ impl JsonParser {
     ///
     /// # Errors
     ///
-    /// Returns a [`JsonError`](crate::JsonError) if the input contains invalid tokens
-    /// (see [`Tokenizer::tokenize`](crate::Tokenizer::tokenize)).
+    /// Returns a [`JsonError`] if the input contains invalid tokens,
+    /// reported with the byte position of the offending character.
     pub fn new(input: &str) -> JsonResult<Self> {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize()?;
@@ -134,10 +134,10 @@ impl JsonParser {
     ///
     /// # Errors
     ///
-    /// Returns [`JsonError::UnexpectedToken`](crate::JsonError::UnexpectedToken) if the
+    /// Returns [`JsonError::UnexpectedToken`] if the
     /// token stream contains structurally invalid JSON (e.g. missing commas, colons, or
     /// mismatched brackets), or
-    /// [`JsonError::UnexpectedEndOfInput`](crate::JsonError::UnexpectedEndOfInput) if the
+    /// [`JsonError::UnexpectedEndOfInput`] if the
     /// input ends before a complete value is formed.
     pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
@@ -432,9 +432,319 @@ impl JsonParser {
     }
 }
 
+fn sp_resolve_escape(byte: u8) -> Option<char> {
+    match byte {
+        b'n' => Some('\n'),
+        b't' => Some('\t'),
+        b'r' => Some('\r'),
+        b'\\' => Some('\\'),
+        b'"' => Some('"'),
+        b'/' => Some('/'),
+        b'b' => Some('\u{0008}'),
+        b'f' => Some('\u{000C}'),
+        _ => None,
+    }
+}
+
+fn sp_parse_unicode_hex(s: &str) -> Option<char> {
+    if s.len() != 4 {
+        return None;
+    }
+    u32::from_str_radix(s, 16).ok().and_then(char::from_u32)
+}
+
+/*
+ * Single-pass parser that scans input bytes and builds JsonValue directly,
+ * eliminating the intermediate Vec<Token> and all token-to-value cloning.
+ */
+struct SinglePassParser<'a> {
+    input: &'a str,
+    current: usize,
+}
+
+impl<'a> SinglePassParser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input, current: 0 }
+    }
+
+    fn peek_byte(&self) -> Option<u8> {
+        self.input.as_bytes().get(self.current).copied()
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(b) = self.peek_byte() {
+            match b {
+                b' ' | b'\n' | b'\t' | b'\r' => self.current += 1,
+                _ => break,
+            }
+        }
+    }
+
+    fn consume_number(&mut self) -> JsonResult<f64> {
+        let start = self.current;
+        while let Some(b) = self.peek_byte() {
+            if !(b.is_ascii_digit()
+                || b == b'.'
+                || b == b'-'
+                || b == b'e'
+                || b == b'E'
+                || b == b'+')
+            {
+                break;
+            }
+            self.current += 1;
+        }
+        let slice = &self.input[start..self.current];
+        slice.parse::<f64>().map_err(|_| JsonError::InvalidNumber {
+            value: slice.to_string(),
+            position: self.current,
+        })
+    }
+
+    fn consume_string(&mut self) -> JsonResult<String> {
+        let mut start = self.current;
+        let mut buf: Option<String> = None;
+
+        loop {
+            match self.input.as_bytes().get(self.current) {
+                Some(&b'"') => {
+                    let tail = &self.input[start..self.current];
+                    self.current += 1;
+                    return Ok(match buf {
+                        None => tail.to_string(),
+                        Some(mut s) => {
+                            s.push_str(tail);
+                            s
+                        }
+                    });
+                }
+                Some(&b'\\') => {
+                    let s = buf.get_or_insert_with(String::new);
+                    s.push_str(&self.input[start..self.current]);
+                    self.consume_escape(s)?;
+                    start = self.current;
+                }
+                Some(_) => self.current += 1,
+                None => {
+                    return Err(JsonError::UnexpectedEndOfInput {
+                        expected: "Closing quote".to_string(),
+                        position: self.current,
+                    });
+                }
+            }
+        }
+    }
+
+    fn consume_escape(&mut self, s: &mut String) -> JsonResult<()> {
+        self.current += 1;
+        let special = self.input.as_bytes().get(self.current).copied().ok_or(
+            JsonError::UnexpectedEndOfInput {
+                expected: "Special meaning char for escape sequence".to_string(),
+                position: self.current,
+            },
+        )?;
+        self.current += 1;
+        if special == b'u' {
+            let hex_start = self.current;
+            if self.current + 4 > self.input.len() {
+                return Err(JsonError::InvalidUnicode {
+                    sequence: format!("\\u{}", &self.input[hex_start..]),
+                    position: self.current,
+                });
+            }
+            let hex_str = &self.input[hex_start..hex_start + 4];
+            let ch = sp_parse_unicode_hex(hex_str).ok_or(JsonError::InvalidUnicode {
+                sequence: format!("\\u{}", hex_str),
+                position: self.current,
+            })?;
+            s.push(ch);
+            self.current += 4;
+        } else {
+            let ch = sp_resolve_escape(special).ok_or(JsonError::InvalidEscape {
+                char: special as char,
+                position: self.current,
+            })?;
+            s.push(ch);
+        }
+        Ok(())
+    }
+
+    fn consume_keyword_value(&mut self) -> JsonResult<JsonValue> {
+        let remaining = &self.input.as_bytes()[self.current..];
+        if remaining.starts_with(b"true") {
+            self.current += 4;
+            return Ok(JsonValue::Boolean(true));
+        }
+        if remaining.starts_with(b"false") {
+            self.current += 5;
+            return Ok(JsonValue::Boolean(false));
+        }
+        if remaining.starts_with(b"null") {
+            self.current += 4;
+            return Ok(JsonValue::Null);
+        }
+        let found = remaining
+            .first()
+            .map_or("unknown".to_string(), |&b| (b as char).to_string());
+        Err(unexpected_token_error(
+            "Valid JSON value",
+            &found,
+            self.current,
+        ))
+    }
+
+    fn parse_value(&mut self) -> JsonResult<JsonValue> {
+        self.skip_whitespace();
+        loop {
+            match self.peek_byte() {
+                Some(b'{') => return self.parse_object(),
+                Some(b'[') => return self.parse_array(),
+                Some(b'"') => {
+                    self.current += 1;
+                    return Ok(JsonValue::String(self.consume_string()?));
+                }
+                Some(b'0'..=b'9' | b'-') => {
+                    return Ok(JsonValue::Number(self.consume_number()?));
+                }
+                Some(b) if b.is_ascii_alphabetic() => return self.consume_keyword_value(),
+                Some(b) if b.is_ascii_punctuation() => {
+                    return Err(unexpected_token_error(
+                        "Valid JSON value",
+                        &(b as char).to_string(),
+                        self.current,
+                    ));
+                }
+                Some(_) => {
+                    self.current += 1;
+                }
+                None => {
+                    return Err(unexpected_end_of_input("valid JSON value", self.current));
+                }
+            }
+        }
+    }
+
+    fn parse_array(&mut self) -> JsonResult<JsonValue> {
+        self.current += 1;
+        self.skip_whitespace();
+        let mut array = Vec::new();
+
+        if self.peek_byte() == Some(b']') {
+            self.current += 1;
+            return Ok(JsonValue::Array(array));
+        }
+
+        loop {
+            let value = self.parse_value()?;
+            array.push(value);
+
+            self.skip_whitespace();
+            match self.peek_byte() {
+                Some(b',') => {
+                    self.current += 1;
+                    self.skip_whitespace();
+                    if self.peek_byte() == Some(b']') {
+                        return Err(unexpected_token_error(
+                            "string, bool, number or object",
+                            "]",
+                            self.current,
+                        ));
+                    }
+                }
+                Some(b']') => {
+                    self.current += 1;
+                    return Ok(JsonValue::Array(array));
+                }
+                Some(b) => {
+                    return Err(unexpected_token_error(
+                        ",",
+                        &(b as char).to_string(),
+                        self.current,
+                    ));
+                }
+                None => {
+                    return Err(unexpected_end_of_input("closing bracket", self.current));
+                }
+            }
+        }
+    }
+
+    fn parse_object(&mut self) -> JsonResult<JsonValue> {
+        self.current += 1;
+        self.skip_whitespace();
+        let mut object = HashMap::new();
+
+        if self.peek_byte() == Some(b'}') {
+            self.current += 1;
+            return Ok(JsonValue::Object(object));
+        }
+
+        loop {
+            self.skip_whitespace();
+            match self.peek_byte() {
+                Some(b'"') => self.current += 1,
+                Some(b) => {
+                    return Err(unexpected_token_error(
+                        "string",
+                        &(b as char).to_string(),
+                        self.current,
+                    ));
+                }
+                None => {
+                    return Err(unexpected_end_of_input("string", self.current));
+                }
+            }
+            let key = self.consume_string()?;
+
+            self.skip_whitespace();
+            match self.peek_byte() {
+                Some(b':') => self.current += 1,
+                Some(b) => {
+                    return Err(unexpected_token_error(
+                        ":",
+                        &(b as char).to_string(),
+                        self.current,
+                    ));
+                }
+                None => {
+                    return Err(unexpected_end_of_input(":", self.current));
+                }
+            }
+
+            let value = self.parse_value()?;
+            object.insert(key, value);
+
+            self.skip_whitespace();
+            match self.peek_byte() {
+                Some(b',') => {
+                    self.current += 1;
+                    self.skip_whitespace();
+                    if self.peek_byte() == Some(b'}') {
+                        return Err(unexpected_token_error("string", "}", self.current));
+                    }
+                }
+                Some(b'}') => {
+                    self.current += 1;
+                    return Ok(JsonValue::Object(object));
+                }
+                Some(b) => {
+                    return Err(unexpected_token_error(
+                        ",",
+                        &(b as char).to_string(),
+                        self.current,
+                    ));
+                }
+                None => {
+                    return Err(unexpected_end_of_input("closing brace", self.current));
+                }
+            }
+        }
+    }
+}
+
 /// Parses a JSON string and returns the corresponding [`JsonValue`].
 ///
-/// This is the main entry point for parsing JSON. It tokenizes and parses in one step.
+/// This is the main entry point for parsing JSON. It scans and parses in a single pass.
 ///
 /// # Examples
 ///
@@ -451,11 +761,11 @@ impl JsonParser {
 ///
 /// # Errors
 ///
-/// Returns a [`JsonError`](crate::JsonError) if the input is not valid JSON. This includes
-/// tokenization errors (invalid characters, malformed strings or numbers) and structural
+/// Returns a [`JsonError`] if the input is not valid JSON. This includes
+/// lexical errors (invalid characters, malformed strings or numbers) and structural
 /// errors (missing commas, unclosed brackets, etc.).
 pub fn parse_json(input: &str) -> JsonResult<JsonValue> {
-    JsonParser::new(input)?.parse()
+    SinglePassParser::new(input).parse_value()
 }
 
 /// Reads a file at the given path and parses its contents as JSON.
@@ -472,8 +782,8 @@ pub fn parse_json(input: &str) -> JsonResult<JsonValue> {
 ///
 /// # Errors
 ///
-/// Returns [`JsonError::Io`](crate::JsonError::Io) if the file cannot be read (e.g. not
-/// found or permission denied), or any other [`JsonError`](crate::JsonError) variant if the
+/// Returns [`JsonError::Io`] if the file cannot be read (e.g. not
+/// found or permission denied), or any other [`JsonError`] variant if the
 /// file contents are not valid JSON.
 pub fn parse_json_file(path: &str) -> JsonResult<JsonValue> {
     let contents = fs::read_to_string(path)?;

@@ -1,4 +1,4 @@
-use rust_json_parser::parser::parse_json;
+use rust_json_parser::parse_json;
 use std::env;
 use std::fs;
 
