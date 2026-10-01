@@ -11,6 +11,7 @@ Cargo.lock
 # Build artifacts
 **/*.rs.bk
 *.pdb
+coverage/
 
 # IDE
 .idea/
