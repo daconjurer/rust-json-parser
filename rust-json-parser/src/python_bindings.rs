@@ -195,13 +195,16 @@ fn dumps(obj: &Bound<PyAny>, indent: Option<usize>) -> PyResult<String> {
     }
 }
 
-fn median(times: &mut [f64]) -> f64 {
+fn median(times: &mut [f64]) -> Option<f64> {
+    if times.is_empty() {
+        return None;
+    }
     times.sort_by(|a, b| a.total_cmp(b));
     let mid = times.len() / 2;
     if times.len() % 2 == 1 {
-        times[mid]
+        Some(times[mid])
     } else {
-        (times[mid - 1] + times[mid]) / 2.0
+        Some((times[mid - 1] + times[mid]) / 2.0)
     }
 }
 
@@ -220,7 +223,7 @@ where
         f()?;
         times.push(start.elapsed().as_secs_f64());
     }
-    Ok(median(&mut times))
+    Ok(median(&mut times).unwrap_or(0.0))
 }
 
 fn bench_pure_rust(input: &str, rounds: u32, warmup: u32) -> PyResult<f64> {
