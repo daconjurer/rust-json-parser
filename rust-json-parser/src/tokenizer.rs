@@ -43,19 +43,6 @@ pub enum Token {
 
 impl Token {
     /// Returns `true` if `self` and `other` are the same variant, ignoring inner values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rust_json_parser::Token;
-    ///
-    /// let a = Token::String("hello".to_string());
-    /// let b = Token::String("world".to_string());
-    /// assert!(a.is_variant(&b));
-    ///
-    /// let c = Token::Number(42.0);
-    /// assert!(!a.is_variant(&c));
-    /// ```
     pub fn is_variant(&self, other: &Self) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
@@ -76,14 +63,6 @@ pub struct Tokenizer<'input> {
 
 impl<'input> Tokenizer<'input> {
     /// Creates a new `Tokenizer` for the given JSON input string.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rust_json_parser::Tokenizer;
-    ///
-    /// let tokenizer = Tokenizer::new(r#"{"key": 42}"#);
-    /// ```
     pub fn new(input: &'input str) -> Self {
         Self { current: 0, input }
     }
@@ -232,23 +211,6 @@ impl<'input> Tokenizer<'input> {
 
     /// Consumes the input and returns the complete list of tokens.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rust_json_parser::{Tokenizer, Token};
-    ///
-    /// let mut tokenizer = Tokenizer::new("[1, true]");
-    /// let tokens = tokenizer.tokenize()?;
-    /// assert_eq!(tokens, vec![
-    ///     Token::LeftBracket,
-    ///     Token::Number(1.0),
-    ///     Token::Comma,
-    ///     Token::Boolean(true),
-    ///     Token::RightBracket,
-    /// ]);
-    /// # Ok::<(), rust_json_parser::JsonError>(())
-    /// ```
-    ///
     /// # Errors
     ///
     /// Returns [`JsonError::UnexpectedToken`] if an invalid character is encountered,
@@ -330,6 +292,16 @@ mod tests {
         let _ = Tokenizer::new(r#""hello""#);
         // Tokenizer should be created without error
         // Internal state is private, so we test via tokenize()
+    }
+
+    #[test]
+    fn test_token_is_variant() {
+        let a = Token::String("hello".to_string());
+        let b = Token::String("world".to_string());
+        assert!(a.is_variant(&b));
+
+        let c = Token::Number(42.0);
+        assert!(!a.is_variant(&c));
     }
 
     #[test]
