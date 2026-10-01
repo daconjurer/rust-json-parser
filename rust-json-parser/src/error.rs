@@ -67,6 +67,49 @@ impl fmt::Display for JsonError {
 
 impl Error for JsonError {}
 
+impl JsonError {
+    /// Resolves this error's byte position within `input` into a 1-based
+    /// `(line, column)` pair, counting characters (not bytes).
+    ///
+    /// Returns `None` for variants without a position (e.g. [`JsonError::Io`]).
+    /// Positions at or after the end of input resolve to the position just
+    /// past the last character.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_json_parser::error::unexpected_token_error;
+    ///
+    /// let input = "{\n  \"key\": value\n}";
+    /// let err = unexpected_token_error("value", "v", 11);
+    /// assert_eq!(err.line_column(input), Some((2, 10)));
+    /// ```
+    pub fn line_column(&self, input: &str) -> Option<(usize, usize)> {
+        let position = match self {
+            JsonError::UnexpectedToken { position, .. }
+            | JsonError::UnexpectedEndOfInput { position, .. }
+            | JsonError::InvalidNumber { position, .. }
+            | JsonError::InvalidEscape { position, .. }
+            | JsonError::InvalidUnicode { position, .. } => *position,
+            JsonError::Io { .. } => return None,
+        };
+        let mut line = 1;
+        let mut column = 1;
+        for (i, ch) in input.char_indices() {
+            if i >= position {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        Some((line, column))
+    }
+}
+
 impl From<std::io::Error> for JsonError {
     fn from(err: std::io::Error) -> Self {
         JsonError::Io {
@@ -192,5 +235,42 @@ mod tests {
             position: 0,
         };
         let _: &dyn std::error::Error = &err; // Must implement Error trait
+    }
+
+    #[test]
+    fn test_line_column_single_line() {
+        let input = r#"{"key": value}"#;
+        let err = unexpected_token_error("value", "v", 8);
+        assert_eq!(err.line_column(input), Some((1, 9)));
+    }
+
+    #[test]
+    fn test_line_column_multiline() {
+        let input = "{\n  \"key\": value\n}";
+        let err = unexpected_token_error("value", "v", 11);
+        assert_eq!(err.line_column(input), Some((2, 10)));
+    }
+
+    #[test]
+    fn test_line_column_end_of_input() {
+        let input = "{\"key\":";
+        let err = unexpected_end_of_input("value", input.len());
+        assert_eq!(err.line_column(input), Some((1, 8)));
+    }
+
+    #[test]
+    fn test_line_column_multibyte_counts_chars() {
+        let input = "\"αβx";
+        let err = unexpected_end_of_input("closing quote", input.len());
+        // position (bytes) 6 = one past 'x'; columns count characters, not bytes
+        assert_eq!(err.line_column(input), Some((1, 5)));
+    }
+
+    #[test]
+    fn test_line_column_io_has_no_position() {
+        let err = JsonError::Io {
+            message: "fail".to_string(),
+        };
+        assert_eq!(err.line_column("anything"), None);
     }
 }

@@ -5,9 +5,9 @@
 //! files into structured [`JsonValue`] representations, and serializing
 //! them back to JSON strings.
 
-mod tokenizer;
 pub mod error;
 pub mod parser;
+mod tokenizer;
 pub mod value;
 
 // Re-export types - make them accessible from the top level
