@@ -62,7 +62,10 @@ impl fmt::Display for JsonError {
                     position, sequence,
                 )
             }
-            JsonError::MaxDepthExceeded { max_depth, position } => {
+            JsonError::MaxDepthExceeded {
+                max_depth,
+                position,
+            } => {
                 write!(
                     f,
                     "Maximum nesting depth of {} exceeded at position {}",
