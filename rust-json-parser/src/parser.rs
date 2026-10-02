@@ -96,10 +96,12 @@ pub struct JsonParser {
     tokens: Vec<(Token, usize)>,
     current: usize,
     input_len: usize,
+    max_depth: usize,
 }
 
 impl JsonParser {
-    /// Tokenizes the input string and creates a new `JsonParser` ready to parse.
+    /// Tokenizes the input string and creates a new `JsonParser` ready to parse
+    /// with the default maximum nesting depth.
     ///
     /// # Examples
     ///
@@ -115,12 +117,19 @@ impl JsonParser {
     /// Returns a [`JsonError`] if the input contains invalid tokens,
     /// reported with the byte position of the offending character.
     pub fn new(input: &str) -> JsonResult<Self> {
+        Self::new_with_max_depth(input, DEFAULT_MAX_DEPTH)
+    }
+
+    /// Tokenizes the input string and creates a new `JsonParser` with a
+    /// configurable maximum nesting depth.
+    pub fn new_with_max_depth(input: &str, max_depth: usize) -> JsonResult<Self> {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize()?;
         Ok(Self {
             current: 0,
             tokens,
             input_len: input.len(),
+            max_depth,
         })
     }
 
@@ -146,8 +155,8 @@ impl JsonParser {
     /// input ends before a complete value is formed.
     pub fn parse(&mut self) -> JsonResult<JsonValue> {
         match self.peek() {
-            Some(Token::LeftBrace) => self.parse_object(),
-            Some(Token::LeftBracket) => self.parse_array(),
+            Some(Token::LeftBrace) => self.parse_object(0),
+            Some(Token::LeftBracket) => self.parse_array(0),
             Some(_) => self.parse_primitive(),
             None => Err(unexpected_end_of_input("string", self.position())),
         }
@@ -177,7 +186,14 @@ impl JsonParser {
      * As array nesting produces the following string pattern: "[[", this method
      * requires the opening bracket to be consumed beforehand.
      */
-    fn parse_array(&mut self) -> JsonResult<JsonValue> {
+    fn parse_array(&mut self, depth: usize) -> JsonResult<JsonValue> {
+        if depth > self.max_depth {
+            return Err(JsonError::MaxDepthExceeded {
+                max_depth: self.max_depth,
+                position: self.position(),
+            });
+        }
+
         self.advance(); // Consume opening [
         let mut array = Vec::new();
         let mut expect_comma = false;
@@ -188,7 +204,7 @@ impl JsonParser {
                 Token::LeftBracket => {
                     err_on_missing_expected_comma(expect_comma, token, self.position())?;
 
-                    let nested_array = self.parse_array()?;
+                    let nested_array = self.parse_array(depth + 1)?;
                     array.push(nested_array);
                     expect_comma = true;
                 }
@@ -201,7 +217,7 @@ impl JsonParser {
                 Token::LeftBrace => {
                     err_on_missing_expected_comma(expect_comma, token, self.position())?;
 
-                    let nested_object = self.parse_object()?;
+                    let nested_object = self.parse_object(depth + 1)?;
                     array.push(nested_object);
                     expect_comma = true;
                 }
@@ -269,7 +285,14 @@ impl JsonParser {
      * As object nesting never produces a string pattern: "{{", this method
      * consumes the opening brace.
      */
-    fn parse_object(&mut self) -> JsonResult<JsonValue> {
+    fn parse_object(&mut self, depth: usize) -> JsonResult<JsonValue> {
+        if depth > self.max_depth {
+            return Err(JsonError::MaxDepthExceeded {
+                max_depth: self.max_depth,
+                position: self.position(),
+            });
+        }
+
         self.advance(); // Consume opening {
         let mut key = String::new();
         let mut object = HashMap::new();
@@ -283,7 +306,7 @@ impl JsonParser {
                     err_on_missing_expected_comma(expect_comma, token, self.position())?;
 
                     if colon_found {
-                        let nested_object = self.parse_object()?;
+                        let nested_object = self.parse_object(depth + 1)?;
                         object.insert(key.clone(), nested_object);
                         colon_found = false;
                         expect_comma = true;
@@ -299,7 +322,7 @@ impl JsonParser {
                     err_on_missing_expected_comma(expect_comma, token, self.position())?;
 
                     if colon_found {
-                        let array = self.parse_array()?;
+                        let array = self.parse_array(depth + 1)?;
                         object.insert(key.clone(), array);
                         colon_found = false;
                         expect_comma = true;
@@ -476,11 +499,16 @@ fn sp_parse_unicode_hex(s: &str) -> Option<char> {
 struct SinglePassParser<'a> {
     input: &'a str,
     current: usize,
+    max_depth: usize,
 }
 
 impl<'a> SinglePassParser<'a> {
-    fn new(input: &'a str) -> Self {
-        Self { input, current: 0 }
+    fn new(input: &'a str, max_depth: usize) -> Self {
+        Self {
+            input,
+            current: 0,
+            max_depth,
+        }
     }
 
     fn peek_byte(&self) -> Option<u8> {
@@ -609,12 +637,12 @@ impl<'a> SinglePassParser<'a> {
         ))
     }
 
-    fn parse_value(&mut self) -> JsonResult<JsonValue> {
+    fn parse_value(&mut self, depth: usize) -> JsonResult<JsonValue> {
         self.skip_whitespace();
         loop {
             match self.peek_byte() {
-                Some(b'{') => return self.parse_object(),
-                Some(b'[') => return self.parse_array(),
+                Some(b'{') => return self.parse_object(depth),
+                Some(b'[') => return self.parse_array(depth),
                 Some(b'"') => {
                     self.current += 1;
                     return Ok(JsonValue::String(self.consume_string()?));
@@ -640,7 +668,14 @@ impl<'a> SinglePassParser<'a> {
         }
     }
 
-    fn parse_array(&mut self) -> JsonResult<JsonValue> {
+    fn parse_array(&mut self, depth: usize) -> JsonResult<JsonValue> {
+        if depth > self.max_depth {
+            return Err(JsonError::MaxDepthExceeded {
+                max_depth: self.max_depth,
+                position: self.current,
+            });
+        }
+
         self.current += 1;
         self.skip_whitespace();
         let mut array = Vec::new();
@@ -651,7 +686,7 @@ impl<'a> SinglePassParser<'a> {
         }
 
         loop {
-            let value = self.parse_value()?;
+            let value = self.parse_value(depth + 1)?;
             array.push(value);
 
             self.skip_whitespace();
@@ -685,7 +720,14 @@ impl<'a> SinglePassParser<'a> {
         }
     }
 
-    fn parse_object(&mut self) -> JsonResult<JsonValue> {
+    fn parse_object(&mut self, depth: usize) -> JsonResult<JsonValue> {
+        if depth > self.max_depth {
+            return Err(JsonError::MaxDepthExceeded {
+                max_depth: self.max_depth,
+                position: self.current,
+            });
+        }
+
         self.current += 1;
         self.skip_whitespace();
         let mut object = HashMap::new();
@@ -727,7 +769,7 @@ impl<'a> SinglePassParser<'a> {
                 }
             }
 
-            let value = self.parse_value()?;
+            let value = self.parse_value(depth + 1)?;
             object.insert(key, value);
 
             self.skip_whitespace();
@@ -758,9 +800,13 @@ impl<'a> SinglePassParser<'a> {
     }
 }
 
+/// Default maximum nesting depth used by `parse_json` and `JsonParser::new`.
+pub const DEFAULT_MAX_DEPTH: usize = 10_000;
+
 /// Parses a JSON string and returns the corresponding [`JsonValue`].
 ///
 /// This is the main entry point for parsing JSON. It scans and parses in a single pass.
+/// Uses [`DEFAULT_MAX_DEPTH`] as the nesting limit.
 ///
 /// # Examples
 ///
@@ -779,9 +825,15 @@ impl<'a> SinglePassParser<'a> {
 ///
 /// Returns a [`JsonError`] if the input is not valid JSON. This includes
 /// lexical errors (invalid characters, malformed strings or numbers) and structural
-/// errors (missing commas, unclosed brackets, etc.).
+/// errors (missing commas, unclosed brackets, etc.), or [`JsonError::MaxDepthExceeded`]
+/// if the input nests deeper than [`DEFAULT_MAX_DEPTH`].
 pub fn parse_json(input: &str) -> JsonResult<JsonValue> {
-    SinglePassParser::new(input).parse_value()
+    parse_json_with_max_depth(input, DEFAULT_MAX_DEPTH)
+}
+
+/// Parses a JSON string with a configurable maximum nesting depth.
+pub fn parse_json_with_max_depth(input: &str, max_depth: usize) -> JsonResult<JsonValue> {
+    SinglePassParser::new(input, max_depth).parse_value(0)
 }
 
 /// Reads a file at the given path and parses its contents as JSON.
@@ -1171,5 +1223,43 @@ mod tests {
         assert!(output.contains("}}"));
         assert!(output.contains("\"nested\": 1"));
         assert!(output.contains("\"more\": \"end\""));
+    }
+
+    // === Depth Limit Tests ===
+
+    #[test]
+    fn test_single_pass_max_depth_at_limit() {
+        let input = "[".repeat(11) + &"]".repeat(11);
+        assert!(parse_json_with_max_depth(&input, 10).is_ok());
+    }
+
+    #[test]
+    fn test_single_pass_max_depth_exceeded() {
+        let input = "[".repeat(12) + &"]".repeat(12);
+        let err = parse_json_with_max_depth(&input, 10).unwrap_err();
+        assert!(matches!(
+            err,
+            JsonError::MaxDepthExceeded { max_depth: 10, .. }
+        ));
+        assert_eq!(err.line_column(&input), Some((1, 12)));
+    }
+
+    #[test]
+    fn test_tokenizer_max_depth_at_limit() {
+        let input = "[".repeat(11) + &"]".repeat(11);
+        let mut parser = JsonParser::new_with_max_depth(&input, 10).unwrap();
+        assert!(parser.parse().is_ok());
+    }
+
+    #[test]
+    fn test_tokenizer_max_depth_exceeded() {
+        let input = "[".repeat(12) + &"]".repeat(12);
+        let mut parser = JsonParser::new_with_max_depth(&input, 10).unwrap();
+        let err = parser.parse().unwrap_err();
+        assert!(matches!(
+            err,
+            JsonError::MaxDepthExceeded { max_depth: 10, .. }
+        ));
+        assert_eq!(err.line_column(&input), Some((1, 12)));
     }
 }

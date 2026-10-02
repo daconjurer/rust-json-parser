@@ -18,6 +18,8 @@ pub enum JsonError {
     InvalidEscape { char: char, position: usize },
     /// A `\uXXXX` escape sequence contains an invalid or incomplete hex value.
     InvalidUnicode { sequence: String, position: usize },
+    /// The input exceeded the configured maximum nesting depth.
+    MaxDepthExceeded { max_depth: usize, position: usize },
     /// A file system operation failed (e.g. file not found, permission denied).
     Io { message: String },
 }
@@ -60,6 +62,16 @@ impl fmt::Display for JsonError {
                     position, sequence,
                 )
             }
+            JsonError::MaxDepthExceeded {
+                max_depth,
+                position,
+            } => {
+                write!(
+                    f,
+                    "Maximum nesting depth of {} exceeded at position {}",
+                    max_depth, position,
+                )
+            }
             JsonError::Io { message } => write!(f, "IO error: {}", message),
         }
     }
@@ -90,7 +102,8 @@ impl JsonError {
             | JsonError::UnexpectedEndOfInput { position, .. }
             | JsonError::InvalidNumber { position, .. }
             | JsonError::InvalidEscape { position, .. }
-            | JsonError::InvalidUnicode { position, .. } => *position,
+            | JsonError::InvalidUnicode { position, .. }
+            | JsonError::MaxDepthExceeded { position, .. } => *position,
             JsonError::Io { .. } => return None,
         };
         let mut line = 1;
