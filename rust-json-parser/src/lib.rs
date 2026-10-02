@@ -14,7 +14,9 @@ pub mod value;
 // Without this: users write `use my_lib::parser::parse_json`
 // With this: users write `use my_lib::parse_json` (cleaner!)
 pub use error::JsonError;
-pub use parser::{JsonParser, parse_json, parse_json_file};
+pub use parser::{
+    DEFAULT_MAX_DEPTH, JsonParser, parse_json, parse_json_file, parse_json_with_max_depth,
+};
 pub use value::JsonValue;
 
 // Type alias for convenience
